@@ -4,6 +4,8 @@ export const APP_CONFIG = Object.freeze({
   userAgentAttribution: 'Squizz Caphinator',
   compatibilityDate: '2026-08-05',
   esiBaseUrl: 'https://esi.evetech.net',
+  eveScoutSignaturesUrl: 'https://api.eve-scout.com/v2/public/signatures',
+  eveScoutCacheMs: 300_000,
   ssoMetadataUrl: 'https://login.eveonline.com/.well-known/oauth-authorization-server',
   // Public deployment configuration. These are not user-editable settings.
   localClientId: '2113ced1124d45ee82163a3298edc652',

@@ -368,7 +368,7 @@ export class UniverseGraph {
         open.push({ id: neighbor.id, score, priority: score + heuristic(neighbor) });
       }
     }
-    throw new Error(`No stargate route exists between ${origin.name} and ${destination.name}.`);
+    throw new Error(`No route exists between ${origin.name} and ${destination.name}.`);
   }
 
   calculateItinerary(systems, options = {}) {

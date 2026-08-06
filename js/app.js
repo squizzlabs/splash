@@ -1,14 +1,16 @@
 import { APP_CONFIG } from './config.js';
 import { TripStore } from './db.js';
 import { ESIClient } from './esi.js';
+import { connectionsForWormholeHubs, EveScoutClient, normalizeWormholeHubs, wormholeStepsForPath } from './eve-scout.js';
 import {
   advanceRouteProgress,
-  autopilotStopsFor,
   buildRoute,
   duplicateRoute,
   itineraryFor,
+  nextRouteNavigationAction,
   parseRouteImport,
   preferenceLabel,
+  remainingRouteWormholes,
   routeStopSystemIndexes,
   serializeRoutes,
   systemSecurityColor
@@ -25,6 +27,7 @@ if (redirectToLocalhost) {
 
 const store = new TripStore();
 const esi = new ESIClient(store);
+const eveScout = new EveScoutClient();
 const state = {
   graph: null,
   systemSearch: [],
@@ -38,7 +41,13 @@ const state = {
   editorCoverageArea: null,
   assigningRouteId: null,
   assignmentCharacterIds: new Set(),
+  assignmentWormholeHubs: new Set(),
   settingRoutes: false,
+  adHocCharacterIds: new Set(),
+  adHocAvoidSystems: [],
+  adHocConnections: [],
+  adHocWormholeHubs: new Set(),
+  settingAdHocRoute: false,
   clearRouteCharacterIds: new Set(),
   clearingRoutes: false,
   detailRouteId: null,
@@ -47,6 +56,11 @@ const state = {
   presenceSyncing: false,
   onlineSyncPending: false,
   locationSyncPending: false,
+  wormholeLinks: [],
+  wormholeFetchedAt: 0,
+  wormholeError: null,
+  wormholeLoading: false,
+  wormholePromise: null,
   sloganTimer: null
 };
 
@@ -93,6 +107,13 @@ function formatRelative(value) {
   if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m ago`;
   if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value));
+}
+
+function formatTimeRemaining(value) {
+  const remaining = Date.parse(value) - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) return 'expired';
+  if (remaining < 60 * 60 * 1000) return `${Math.max(1, Math.ceil(remaining / 60_000))}m left`;
+  return `${Math.ceil(remaining / 3_600_000)}h left`;
 }
 
 function formatDate(value) {
@@ -145,6 +166,141 @@ function jumpLabel(route) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   return min === max ? String(min) : `${min}–${max}`;
+}
+
+function selectedEditorWormholeHubs() {
+  return normalizeWormholeHubs([
+    $('route-wormhole-thera').checked ? 'thera' : null,
+    $('route-wormhole-turnur').checked ? 'turnur' : null
+  ]);
+}
+
+function selectedAssignmentWormholeHubs() {
+  return normalizeWormholeHubs([...state.assignmentWormholeHubs]);
+}
+
+function selectedAdHocWormholeHubs() {
+  return normalizeWormholeHubs([...state.adHocWormholeHubs]);
+}
+
+function routingOptions(route) {
+  return {
+    ...route,
+    connections: [
+      ...(route.connections || []),
+      ...connectionsForWormholeHubs(state.wormholeLinks, route.wormholeHubs)
+    ]
+  };
+}
+
+function renderWormholeStatus(status, hubs, offMessage) {
+  if (!status) return;
+  status.classList.toggle('is-error', Boolean(state.wormholeError && hubs.length));
+  if (!hubs.length) {
+    status.textContent = offMessage;
+    return;
+  }
+  if (state.wormholeLoading) {
+    status.textContent = 'Loading active EVE-Scout connections…';
+    return;
+  }
+  if (state.wormholeError) {
+    status.textContent = state.wormholeError;
+    return;
+  }
+  const counts = hubs.map((hub) => {
+    const count = state.wormholeLinks.filter((link) => link.hub === hub && Date.parse(link.expiresAt) > Date.now()).length;
+    return `${hub === 'thera' ? 'Thera' : 'Turnur'} ${count}`;
+  });
+  status.textContent = state.wormholeFetchedAt
+    ? `${counts.join(' · ')} active · checked ${formatRelative(state.wormholeFetchedAt)}`
+    : 'Active connections will load before this route is calculated.';
+}
+
+function renderWormholeStatuses() {
+  renderWormholeStatus(
+    $('route-wormhole-status'),
+    selectedEditorWormholeHubs(),
+    'Off. This route uses stargates and custom connections only.'
+  );
+  renderWormholeStatus(
+    $('assignment-wormhole-status'),
+    selectedAssignmentWormholeHubs(),
+    'Off. This assignment uses stargates and custom connections only.'
+  );
+  renderWormholeStatus(
+    $('ad-hoc-wormhole-status'),
+    selectedAdHocWormholeHubs(),
+    'Off. This route uses stargates and custom connections only.'
+  );
+}
+
+async function refreshWormholeConnections({ force = false } = {}) {
+  const fresh = state.wormholeFetchedAt > Date.now() - APP_CONFIG.eveScoutCacheMs;
+  if (!force && fresh) return state.wormholeLinks;
+  if (state.wormholePromise) return state.wormholePromise;
+  state.wormholeLoading = true;
+  state.wormholeError = null;
+  renderWormholeStatuses();
+  state.wormholePromise = (async () => {
+    try {
+      const result = await eveScout.connections((systemId) => state.graph?.get(systemId));
+      state.wormholeLinks = result.links;
+      state.wormholeFetchedAt = Date.parse(result.fetchedAt);
+      return state.wormholeLinks;
+    } catch (error) {
+      state.wormholeError = `Live wormhole connections could not be loaded: ${error.message}`;
+      throw error;
+    } finally {
+      state.wormholeLoading = false;
+      state.wormholePromise = null;
+      renderWormholeStatuses();
+    }
+  })();
+  return state.wormholePromise;
+}
+
+async function ensureWormholeConnections(route) {
+  if (!normalizeWormholeHubs(route?.wormholeHubs).length) return;
+  try {
+    await refreshWormholeConnections();
+  } catch (error) {
+    throw new Error(`This route uses live EVE-Scout wormholes, but they could not be refreshed: ${error.message}`);
+  }
+}
+
+function hasUnmappedCalculatedConnection(route, calculation) {
+  const custom = new Set((route.connections || []).map((connection) => `${connection.from.id}:${connection.to.id}`));
+  const wormholes = new Set((calculation?.wormholeSteps || []).map((step) => `${step.from.id}:${step.to.id}`));
+  return (calculation?.systems || []).slice(0, -1).some((system, index) => {
+    const next = calculation.systems[index + 1];
+    const key = `${system.id}:${next.id}`;
+    return !state.graph.get(system.id)?.adjacent.includes(Number(next.id)) && !custom.has(key) && !wormholes.has(key);
+  });
+}
+
+async function hydrateSavedWormholeSteps() {
+  const changed = [];
+  state.routes.forEach((route) => {
+    const hubs = new Set(normalizeWormholeHubs(route.wormholeHubs));
+    if (!hubs.size) return;
+    let routeChanged = false;
+    const links = state.wormholeLinks.filter((link) => hubs.has(link.hub));
+    const calculations = (route.calculations || []).map((calculation) => {
+      if (calculation.wormholeSteps?.length || !calculation.systems?.length) return calculation;
+      const wormholeSteps = wormholeStepsForPath(links, calculation.systems);
+      if (!wormholeSteps.length) return calculation;
+      const hydrated = { ...calculation, wormholeSteps };
+      if (hasUnmappedCalculatedConnection(route, hydrated)) return calculation;
+      routeChanged = true;
+      return hydrated;
+    });
+    if (routeChanged) changed.push({ ...route, calculations });
+  });
+  if (!changed.length) return;
+  await store.putMany('routes', changed);
+  const replacements = new Map(changed.map((route) => [route.id, route]));
+  state.routes = state.routes.map((route) => replacements.get(route.id) || route);
 }
 
 function selectedCharacters(route) {
@@ -238,7 +394,11 @@ function assignedPilotProgress(character) {
   const systems = calculation?.systems || [];
   const specifiedStops = route.mode === 'coverage' ? calculation?.stops || route.stops : route.stops;
   const stopIndexes = new Set(routeStopSystemIndexes(systems, specifiedStops));
-  const annotateSystem = (routeSystem, systemIndex) => ({ ...routeSystem, isStop: stopIndexes.has(systemIndex) });
+  const wormholesByOrigin = new Map((calculation?.wormholeSteps || []).map((step) => [Number(step.fromIndex), step]));
+  const annotateSystem = (routeSystem, systemIndex) => {
+    const wormhole = wormholesByOrigin.get(systemIndex) || null;
+    return { ...routeSystem, routeIndex: systemIndex, isStop: stopIndexes.has(systemIndex) || Boolean(wormhole), wormhole };
+  };
   const progressKey = `${route.id}:${route.lastSentAt || ''}:${calculation?.calculatedAt || ''}`;
   const previous = character.routeProgress?.key === progressKey ? character.routeProgress : null;
   const progress = advanceRouteProgress(systems, character.location?.id, previous);
@@ -254,11 +414,14 @@ function assignedPilotProgress(character) {
       ? Math.min(previous.systemIndex + 1, systems.length - 1)
       : 0;
     try {
-      const rejoin = state.graph.astar(character.location.id, systems[targetIndex].id, route);
+      const rejoin = state.graph.astar(character.location.id, systems[targetIndex].id, routingOptions(route));
       remainingSystems = [
         ...rejoin.slice(1).map((systemId, index, path) => {
           const system = state.graph.get(systemId);
-          return system ? { ...system, isStop: index === path.length - 1 && stopIndexes.has(targetIndex) } : null;
+          if (!system) return null;
+          return index === path.length - 1
+            ? annotateSystem(system, targetIndex)
+            : { ...system, routeIndex: null, isStop: false, wormhole: null };
         }).filter(Boolean),
         ...systems.slice(targetIndex + 1).map((routeSystem, offset) => annotateSystem(routeSystem, targetIndex + 1 + offset))
       ];
@@ -268,21 +431,154 @@ function assignedPilotProgress(character) {
     }
   }
 
+  const routeProgress = {
+    key: progressKey,
+    routeId: route.id,
+    calculationKey: calculation?.key || null,
+    systemIndex: progress.systemIndex,
+    lastSystemId: progress.lastSystemId,
+    onRoute: progress.onRoute,
+    sentWaypointKey: previous?.sentWaypointKey || null,
+    waypointAttemptKey: previous?.waypointAttemptKey || null,
+    waypointAttemptedAt: previous?.waypointAttemptedAt || null,
+    waypointError: previous?.waypointError || null,
+    updatedAt: new Date().toISOString()
+  };
+  const navigationError = calculation && hasUnmappedCalculatedConnection(route, calculation)
+    ? 'Wormhole instructions are unavailable for this calculation. Reassign the route before continuing.'
+    : null;
   return {
     route,
     calculation,
     jumpsRemaining,
     remainingSystems,
-    progress: {
-      key: progressKey,
-      routeId: route.id,
-      calculationKey: calculation?.key || null,
-      systemIndex: progress.systemIndex,
-      lastSystemId: progress.lastSystemId,
-      onRoute: progress.onRoute,
-      updatedAt: new Date().toISOString()
-    }
+    nextAction: calculation && !navigationError ? nextRouteNavigationAction(route, character, routeProgress) : null,
+    navigationError,
+    progress: routeProgress
   };
+}
+
+function canSetEsiWaypoint(destination) {
+  const systemId = Number(destination?.systemId ?? destination?.id);
+  return Boolean(state.graph.get(systemId)?.adjacent.length);
+}
+
+async function advancePilotWaypoint(character, assignment) {
+  const action = assignment?.nextAction;
+  if (!action || action.kind !== 'waypoint') return { ...character, routeProgress: assignment?.progress || character.routeProgress };
+  if (action.wormhole && Date.parse(action.wormhole.expiresAt) <= Date.now()) {
+    return { ...character, routeProgress: assignment.progress };
+  }
+  if (!canSetEsiWaypoint(action.destination)) return { ...character, routeProgress: assignment.progress };
+  const previous = assignment.progress;
+  if (previous.sentWaypointKey === action.key) return { ...character, routeProgress: previous };
+  const lastAttempt = Date.parse(previous.waypointAttemptedAt || 0) || 0;
+  if (previous.waypointAttemptKey === action.key && lastAttempt > Date.now() - 60_000) {
+    return { ...character, routeProgress: previous };
+  }
+  const attemptedAt = new Date().toISOString();
+  try {
+    await esi.setWaypoint(character.id, action.destination.id, !previous.sentWaypointKey);
+    return {
+      ...character,
+      routeProgress: {
+        ...previous,
+        sentWaypointKey: action.key,
+        waypointAttemptKey: action.key,
+        waypointAttemptedAt: attemptedAt,
+        waypointError: null
+      }
+    };
+  } catch (error) {
+    console.warn(`Could not advance ${character.name}'s waypoint:`, error);
+    return {
+      ...character,
+      routeProgress: {
+        ...previous,
+        waypointAttemptKey: action.key,
+        waypointAttemptedAt: attemptedAt,
+        waypointError: error.message
+      }
+    };
+  }
+}
+
+function initialNavigationAction(route, calculation, character) {
+  const progress = advanceRouteProgress(calculation.systems, character.location?.id);
+  return nextRouteNavigationAction({ ...route, calculations: [calculation] }, character, progress);
+}
+
+function jumpMarkerMarkup(routeSystem) {
+  const system = state.graph.get(routeSystem.id);
+  const security = Number(system?.security);
+  const securityLabel = Number.isFinite(security) ? security.toFixed(1) : 'unknown security';
+  const stopLabel = routeSystem.wormhole
+    ? ` · wormhole ${routeSystem.wormhole.signatureId} → ${routeSystem.wormhole.to.name}`
+    : routeSystem.isStop ? ' · route stop' : '';
+  const title = `${system?.name || routeSystem.name || `System ${routeSystem.id}`} · ${securityLabel}${stopLabel}`;
+  const markerClass = routeSystem.isStop ? 'is-stop' : 'is-transit';
+  const color = systemSecurityColor(security);
+  return `<span class="jump-marker ${markerClass}" style="--jump-color:${color}" title="${escapeHtml(title)}" aria-hidden="true"></span>`;
+}
+
+function wormholeInstructionMarkup(wormhole, assignment) {
+  const active = assignment.nextAction?.wormhole || null;
+  const activeKey = active?.key || `${active?.id}:${active?.fromIndex}:${active?.toIndex}`;
+  const stepKey = wormhole.key || `${wormhole.id}:${wormhole.fromIndex}:${wormhole.toIndex}`;
+  const isActive = Boolean(active && stepKey === activeKey);
+  const atHole = isActive && assignment.nextAction.kind === 'wormhole';
+  const expired = Date.parse(wormhole.expiresAt) <= Date.now();
+  const instruction = expired
+    ? `<strong>${escapeHtml(wormhole.from.name)}</strong><span>SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>has expired — reassign this route</span>`
+    : atHole
+      ? `<span>Warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`
+      : `<span>At</span><strong>${escapeHtml(wormhole.from.name)}</strong><span>warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`;
+  return `<div class="pilot-wormhole-stop ${isActive ? 'is-active' : ''} ${expired ? 'is-expired' : ''}">
+    <span class="pilot-wormhole-plus" aria-hidden="true">+</span>
+    <span class="pilot-wormhole-instruction">${instruction}</span>
+    <small>${escapeHtml(wormhole.wormholeType)} · max ${escapeHtml(wormhole.maxShipSize)} · ${escapeHtml(formatTimeRemaining(wormhole.expiresAt))}</small>
+  </div>`;
+}
+
+function routeProgressTimelineMarkup(assignment) {
+  const wormholes = remainingRouteWormholes(
+    assignment.route,
+    assignment.calculation?.characterId,
+    assignment.progress
+  );
+  const parts = [];
+  let markers = [];
+  let wormholeIndex = 0;
+  const flushMarkers = () => {
+    if (!markers.length) return;
+    parts.push(`<div class="pilot-jump-track">${markers.join('')}</div>`);
+    markers = [];
+  };
+  const appendWormhole = (wormhole) => {
+    flushMarkers();
+    parts.push(wormholeInstructionMarkup(wormhole, assignment));
+  };
+
+  assignment.remainingSystems.forEach((routeSystem) => {
+    const routeIndex = Number.isInteger(routeSystem.routeIndex) ? routeSystem.routeIndex : null;
+    while (wormholeIndex < wormholes.length && routeIndex != null && Number(wormholes[wormholeIndex].fromIndex) < routeIndex) {
+      appendWormhole(wormholes[wormholeIndex]);
+      wormholeIndex += 1;
+    }
+    markers.push(jumpMarkerMarkup(routeSystem));
+    while (wormholeIndex < wormholes.length && routeIndex != null && Number(wormholes[wormholeIndex].fromIndex) === routeIndex) {
+      appendWormhole(wormholes[wormholeIndex]);
+      wormholeIndex += 1;
+    }
+  });
+  while (wormholeIndex < wormholes.length) {
+    appendWormhole(wormholes[wormholeIndex]);
+    wormholeIndex += 1;
+  }
+  flushMarkers();
+  return parts.length
+    ? `<div class="pilot-route-timeline" aria-label="${assignment.jumpsRemaining} jumps remaining">${parts.join('')}</div>`
+    : '';
 }
 
 function renderAssignedPilots() {
@@ -306,21 +602,16 @@ function renderAssignedPilots() {
     const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
     const jumps = assignment.jumpsRemaining == null ? '—' : assignment.jumpsRemaining;
     const jumpLabel = assignment.jumpsRemaining === 0 ? 'complete' : 'jumps left';
-    const jumpSquares = assignment.remainingSystems.map((routeSystem) => {
-      const system = state.graph.get(routeSystem.id);
-      const security = Number(system?.security);
-      const securityLabel = Number.isFinite(security) ? security.toFixed(1) : 'unknown security';
-      const title = `${system?.name || routeSystem.name || `System ${routeSystem.id}`} · ${securityLabel}${routeSystem.isStop ? ' · route stop' : ''}`;
-      const markerClass = routeSystem.isStop ? 'is-stop' : 'is-transit';
-      const color = systemSecurityColor(security);
-      return `<span class="jump-marker ${markerClass}" style="--jump-color:${color}" title="${escapeHtml(title)}" aria-hidden="true"></span>`;
-    }).join('');
     return `<article class="pilot-progress-row ${online ? '' : 'is-offline'}">
       <img src="${portraitUrl(character.id, 64)}" alt="">
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
       <div class="pilot-progress-jumps"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
-      ${jumpSquares ? `<div class="pilot-jump-track" aria-label="${assignment.jumpsRemaining} jumps remaining">${jumpSquares}</div>` : ''}
+      ${routeProgressTimelineMarkup(assignment)}
+      ${assignment.progress.waypointError && assignment.progress.waypointAttemptKey === assignment.nextAction?.key
+        ? `<div class="pilot-waypoint-error">Could not set next waypoint: ${escapeHtml(assignment.progress.waypointError)}</div>`
+        : ''}
+      ${assignment.navigationError ? `<div class="pilot-waypoint-error">${escapeHtml(assignment.navigationError)}</div>` : ''}
     </article>`;
   }).join('');
 }
@@ -332,7 +623,14 @@ function renderRoutes() {
   const sort = $('route-sort').value;
   let routes = state.routes.filter((route) => {
     const matchesStatus = status === 'all' || route.status === status;
-    const haystack = [route.name, route.notes, route.origin?.name, route.coverageArea?.name, ...(route.stops || []).map((item) => item.name)].join(' ').toLocaleLowerCase();
+    const haystack = [
+      route.name,
+      route.notes,
+      route.origin?.name,
+      route.coverageArea?.name,
+      ...normalizeWormholeHubs(route.wormholeHubs),
+      ...(route.stops || []).map((item) => item.name)
+    ].join(' ').toLocaleLowerCase();
     return matchesStatus && (!query || haystack.includes(query));
   });
   routes = routes.sort((a, b) => {
@@ -356,6 +654,10 @@ function renderRoutes() {
     const crew = selectedCharacters(route);
     const coverage = route.mode === 'coverage';
     const stops = route.stops?.length ? `${route.stops.length} ${coverage ? 'systems' : `stop${route.stops.length === 1 ? '' : 's'}`} · ` : '';
+    const wormholeLabel = normalizeWormholeHubs(route.wormholeHubs)
+      .map((hub) => hub === 'thera' ? 'Thera' : 'Turnur')
+      .join(' + ');
+    const shortcuts = wormholeLabel ? ` · ${wormholeLabel}` : '';
     const endpointLabel = coverage ? 'Coverage area' : 'Final stop';
     const endpointName = coverage ? route.coverageArea?.name || 'Unknown area' : route.stops?.at(-1)?.name || 'No stops';
     const jumpValue = jumpLabel(route);
@@ -363,7 +665,7 @@ function renderRoutes() {
       <div class="route-primary">
         <div class="route-primary-top"><span class="status-pill status-${route.status}">${escapeHtml(route.status)}</span><span class="route-updated">${formatRelative(route.updatedAt)}</span></div>
         <h3>${escapeHtml(route.name)}</h3>
-        <p>${escapeHtml(stops + preferenceLabel(route.preference))}</p>
+        <p>${escapeHtml(stops + preferenceLabel(route.preference) + shortcuts)}</p>
       </div>
       <div class="route-line">
         <div class="route-system"><span>${endpointLabel}</span><strong>${escapeHtml(endpointName)}</strong></div>
@@ -498,6 +800,8 @@ function showSystemAutocomplete(input) {
   autocomplete.matches = matches;
   autocomplete.activeIndex = 0;
   const menu = $('system-autocomplete-menu');
+  const dialog = input.closest('dialog');
+  if (dialog && menu.parentElement !== dialog) dialog.append(menu);
   const areaInput = input.hasAttribute('data-area-autocomplete');
   const stopInput = input.hasAttribute('data-stop-autocomplete');
   menu.innerHTML = matches.map((item, index) => `<button id="system-option-${index}" type="button" role="option" data-index="${index}" aria-selected="${index === 0 ? 'true' : 'false'}" class="${index === 0 ? 'is-active' : ''}">
@@ -565,7 +869,7 @@ function bindSystemAutocomplete() {
   document.addEventListener('pointerdown', (event) => {
     if (!event.target.closest('[data-system-autocomplete], [data-stop-autocomplete], [data-area-autocomplete]') && !event.target.closest('#system-autocomplete-menu')) hideSystemAutocomplete();
   });
-  $('route-editor').addEventListener('scroll', positionSystemAutocomplete, true);
+  document.querySelectorAll('.modal').forEach((dialog) => dialog.addEventListener('scroll', positionSystemAutocomplete, true));
   window.addEventListener('resize', positionSystemAutocomplete);
 }
 
@@ -575,6 +879,7 @@ function renderAll() {
   renderCharacters();
   renderSettings();
   if ($('route-assignment').open) renderRouteAssignment();
+  if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
   const openDetail = currentDetailRoute();
   if ($('route-detail').open && openDetail) openRouteDetail(openDetail);
 }
@@ -587,7 +892,7 @@ async function beginAuthorization() {
   }
 }
 
-async function refreshCharacterPresence(character, quiet = false) {
+async function refreshCharacterPresence(character, quiet = false, advanceWaypoints = true) {
   try {
     const updated = await syncCharacterPresence(character, {
       getOnline: (characterId) => esi.characterOnline(characterId),
@@ -597,7 +902,11 @@ async function refreshCharacterPresence(character, quiet = false) {
       resolveStop: (stopId) => state.graph?.resolveStop(stopId)
     });
     const assignment = assignedPilotProgress(updated);
-    const tracked = assignment ? { ...updated, routeProgress: assignment.progress } : updated;
+    const tracked = assignment
+      ? advanceWaypoints
+        ? await advancePilotWaypoint(updated, assignment)
+        : { ...updated, routeProgress: assignment.progress }
+      : updated;
     await store.put('characters', tracked);
     const index = state.characters.findIndex((item) => item.id === character.id);
     if (index >= 0) state.characters[index] = tracked;
@@ -647,7 +956,7 @@ async function refreshCharacterLocation(character) {
     resolveStop: (stopId) => state.graph?.resolveStop(stopId)
   });
   const assignment = assignedPilotProgress(updated);
-  const tracked = assignment ? { ...updated, routeProgress: assignment.progress } : updated;
+  const tracked = assignment ? await advancePilotWaypoint(updated, assignment) : updated;
   await store.put('characters', tracked);
   const index = state.characters.findIndex((item) => item.id === character.id);
   if (index >= 0) state.characters[index] = tracked;
@@ -659,6 +968,7 @@ function renderPilotData() {
   renderRoutes();
   renderCharacters();
   if ($('route-assignment').open) renderRouteAssignment();
+  if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
   const openDetail = currentDetailRoute();
   if ($('route-detail').open && openDetail) openRouteDetail(openDetail);
 }
@@ -721,6 +1031,7 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
     renderRoutes();
     renderCharacters();
     if ($('route-assignment').open) renderRouteAssignment();
+    if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
     const openDetail = currentDetailRoute();
     if ($('route-detail').open && openDetail) openRouteDetail(openDetail);
     const successes = results.filter((result) => result.status === 'fulfilled').length;
@@ -791,11 +1102,14 @@ async function generateCoverageStops() {
       preference: document.querySelector('input[name="preference"]:checked')?.value || 'Shorter',
       securityPenalty: $('security-penalty').value,
       avoidSystems: state.editorAvoidSystems,
-      connections: state.editorConnections
+      connections: state.editorConnections,
+      wormholeHubs: selectedEditorWormholeHubs()
     };
+    await ensureWormholeConnections(options);
+    const liveOptions = routingOptions(options);
     const optimized = origin
-      ? state.graph.calculateCoverage(origin, targets, options)
-      : state.graph.calculateBestCoverage(targets, options);
+      ? state.graph.calculateCoverage(origin, targets, liveOptions)
+      : state.graph.calculateBestCoverage(targets, liveOptions);
     const ordered = optimized.stops;
     state.editorCoverageArea = { type, id: area.id, name: area.name };
     state.editorStops = ordered;
@@ -936,7 +1250,7 @@ async function addCurrentLocationsToRoute() {
   if (!current) throw new Error('No connected character is currently online.');
   setBusy(button, true, 'Checking…');
   try {
-    const character = await refreshCharacterPresence(current, true);
+    const character = await refreshCharacterPresence(current, true, false);
     if (!isCharacterOnline(character) || !character.location?.stop) {
       throw new Error(`${character.name} does not have an available live location.`);
     }
@@ -1013,6 +1327,9 @@ function openRouteEditor(route = null) {
   state.editorStops = (route?.stops || []).map((stop) => ({ ...stop }));
   state.editorAvoidSystems = (route?.avoidSystems || []).map((system) => ({ ...system }));
   state.editorConnections = (route?.connections || []).map((connection) => ({ from: { ...connection.from }, to: { ...connection.to } }));
+  const wormholeHubs = new Set(normalizeWormholeHubs(route?.wormholeHubs));
+  $('route-wormhole-thera').checked = wormholeHubs.has('thera');
+  $('route-wormhole-turnur').checked = wormholeHubs.has('turnur');
   $('route-waypoint-input').value = '';
   $('route-avoid-input').value = '';
   $('route-connection-from').value = '';
@@ -1026,7 +1343,9 @@ function openRouteEditor(route = null) {
   updateOriginMode();
   updateRouteMode();
   updatePreference();
+  renderWormholeStatuses();
   $('route-editor').showModal();
+  if (wormholeHubs.size) refreshWormholeConnections().catch(() => {});
   setTimeout(() => $('route-name').focus(), 50);
 }
 
@@ -1043,17 +1362,28 @@ function resolveStop(query, label) {
 }
 
 function calculateSeedItinerary(seed, origin, characterId = null) {
+  const options = routingOptions(seed);
+  const selectedHubs = new Set(normalizeWormholeHubs(seed.wormholeHubs));
+  let result;
   if (seed.mode === 'coverage') {
     const targets = seed.stops || [];
     if (!targets.length) return null;
-    return origin
-      ? state.graph.calculateCoverage(origin, targets, seed)
-      : state.graph.calculateBestCoverage(targets, seed);
+    result = origin
+      ? state.graph.calculateCoverage(origin, targets, options)
+      : state.graph.calculateBestCoverage(targets, options);
+  } else {
+    result = {
+      origin,
+      systems: state.graph.calculateItinerary(itineraryFor(seed, origin, characterId), options),
+      stops: []
+    };
   }
   return {
-    origin,
-    systems: state.graph.calculateItinerary(itineraryFor(seed, origin, characterId), seed),
-    stops: []
+    ...result,
+    wormholeSteps: wormholeStepsForPath(
+      state.wormholeLinks.filter((link) => selectedHubs.has(link.hub)),
+      result.systems
+    )
   };
 }
 
@@ -1073,6 +1403,7 @@ function calculateAssignedItineraries(route, characters) {
       origin: result.origin,
       systems: result.systems,
       stops: result.stops,
+      wormholeSteps: result.wormholeSteps,
       calculatedAt
     }];
   });
@@ -1092,6 +1423,7 @@ async function recalculateAssignedRoutes() {
     const characters = selectedCharacters(route);
     if (!characters.length || !routeNeedsAssignedCalculation(route, characters)) continue;
     try {
+      await ensureWormholeConnections(route);
       const calculations = calculateAssignedItineraries(route, characters);
       changed.push(buildRoute({
         ...route,
@@ -1120,6 +1452,8 @@ async function saveRoute(event) {
     const assignedCharacterIds = previous?.assignedCharacterIds || [];
     const originMode = $('route-origin-mode').value;
     const mode = $('route-mode').value;
+    const wormholeHubs = selectedEditorWormholeHubs();
+    await ensureWormholeConnections({ wormholeHubs });
     if (mode === 'coverage') {
       const type = $('route-coverage-type').value;
       const area = state.graph.resolveArea($('route-coverage-area').value, type);
@@ -1143,6 +1477,7 @@ async function saveRoute(event) {
       stops: state.editorStops,
       avoidSystems: state.editorAvoidSystems,
       connections: state.editorConnections,
+      wormholeHubs,
       assignedCharacterIds,
       stopAssignments: [],
       preference: document.querySelector('input[name="preference"]:checked').value,
@@ -1161,7 +1496,7 @@ async function saveRoute(event) {
       if (character) {
         status.textContent = `Checking ${character.name}’s current location…`;
         try {
-          character = await refreshCharacterPresence(character, true);
+          character = await refreshCharacterPresence(character, true, false);
         } catch (_) {
           character = null;
         }
@@ -1169,11 +1504,25 @@ async function saveRoute(event) {
       if (character && isCharacterOnline(character) && character.location && !character.locationError) {
         const origin = resolveSystem(character.location.id, `${character.name}’s location`);
         const result = calculateSeedItinerary(seed, origin, null);
-        if (result) calculations.push({ key: 'reference', characterId: null, origin: result.origin, systems: result.systems, stops: result.stops });
+        if (result) calculations.push({
+          key: 'reference',
+          characterId: null,
+          origin: result.origin,
+          systems: result.systems,
+          stops: result.stops,
+          wormholeSteps: result.wormholeSteps
+        });
       }
     } else {
       const result = calculateSeedItinerary(seed, seed.origin, null);
-      if (result) calculations.push({ key: originMode === 'auto' ? 'optimized' : 'fixed', characterId: null, origin: result.origin, systems: result.systems, stops: result.stops });
+      if (result) calculations.push({
+        key: originMode === 'auto' ? 'optimized' : 'fixed',
+        characterId: null,
+        origin: result.origin,
+        systems: result.systems,
+        stops: result.stops,
+        wormholeSteps: result.wormholeSteps
+      });
     }
 
     const route = buildRoute({
@@ -1263,6 +1612,11 @@ function renderRouteAssignment() {
   const onlineCharacters = state.characters.filter(isCharacterOnline);
   const onlineCharacterIds = new Set(onlineCharacters.map((character) => character.id));
   state.assignmentCharacterIds = new Set([...state.assignmentCharacterIds].filter((id) => onlineCharacterIds.has(id)));
+  $('assignment-wormhole-thera').checked = state.assignmentWormholeHubs.has('thera');
+  $('assignment-wormhole-turnur').checked = state.assignmentWormholeHubs.has('turnur');
+  $('assignment-wormhole-thera').disabled = state.settingRoutes;
+  $('assignment-wormhole-turnur').disabled = state.settingRoutes;
+  renderWormholeStatuses();
   $('route-assignment-title').textContent = `Assign pilots · ${route.name}`;
   $('route-assignment-character-options').innerHTML = state.characters.map((character) => {
     const online = isCharacterOnline(character);
@@ -1305,11 +1659,13 @@ function renderRouteAssignment() {
 function openRouteAssignment(route) {
   state.assigningRouteId = route.id;
   state.assignmentCharacterIds = new Set();
+  state.assignmentWormholeHubs = new Set(normalizeWormholeHubs(route.wormholeHubs));
   state.settingRoutes = false;
   $('route-assignment-status').textContent = '';
   $('route-assignment-status').classList.remove('is-error');
   renderRouteAssignment();
   if (!$('route-assignment').open) $('route-assignment').showModal();
+  if (state.assignmentWormholeHubs.size) refreshWormholeConnections().catch(() => {});
 }
 
 function selectAllRoutePilots(selected) {
@@ -1320,8 +1676,134 @@ function selectAllRoutePilots(selected) {
   renderRouteAssignment();
 }
 
+function setAdHocStatus(message = '', isError = false) {
+  const status = $('ad-hoc-route-status');
+  status.textContent = message;
+  status.classList.toggle('is-error', isError);
+}
+
+function updateAdHocPreference() {
+  const preference = document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || 'Shorter';
+  $('ad-hoc-security-penalty-field').hidden = preference === 'Shorter';
+}
+
+function renderAdHocRouteDialog() {
+  const onlineCharacters = state.characters.filter(isCharacterOnline);
+  const onlineCharacterIds = new Set(onlineCharacters.map((character) => character.id));
+  state.adHocCharacterIds = new Set([...state.adHocCharacterIds].filter((id) => onlineCharacterIds.has(id)));
+  $('ad-hoc-controls').disabled = state.settingAdHocRoute;
+  $('ad-hoc-wormhole-thera').checked = state.adHocWormholeHubs.has('thera');
+  $('ad-hoc-wormhole-turnur').checked = state.adHocWormholeHubs.has('turnur');
+  $('ad-hoc-character-options').innerHTML = state.characters.map((character) => {
+    const online = isCharacterOnline(character);
+    const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
+    const selectable = online && !state.settingAdHocRoute;
+    return `<label class="character-option ${selectable ? '' : 'is-disabled'} ${online ? '' : 'is-offline'}" ${online ? '' : 'title="Offline pilots cannot receive routes"'}>
+      <input type="checkbox" value="${character.id}" ${state.adHocCharacterIds.has(character.id) ? 'checked' : ''} ${selectable ? '' : 'disabled'}>
+      <span><img src="${portraitUrl(character.id, 64)}" alt=""><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(online ? `Online · ${location}` : `Offline · ${location}`)}</small></span>
+    </label>`;
+  }).join('');
+  $('ad-hoc-character-empty').hidden = onlineCharacters.length > 0;
+  const selectedCount = state.adHocCharacterIds.size;
+  $('ad-hoc-select-all').disabled = state.settingAdHocRoute || !onlineCharacters.length || selectedCount === onlineCharacters.length;
+  $('ad-hoc-select-none').disabled = state.settingAdHocRoute || selectedCount === 0;
+  $('ad-hoc-route-submit').disabled = state.settingAdHocRoute || selectedCount === 0;
+  $('ad-hoc-avoid-list').innerHTML = state.adHocAvoidSystems.map((system, index) => `<span class="system-chip">
+    ${escapeHtml(system.name)}
+    <button type="button" data-ad-hoc-avoid-remove data-index="${index}" aria-label="Remove ${escapeHtml(system.name)}">×</button>
+  </span>`).join('');
+  $('ad-hoc-connection-list').innerHTML = state.adHocConnections.map((connection, index) => `<div class="connection-row">
+    <strong>${escapeHtml(connection.from.name)}</strong><span>→</span><strong>${escapeHtml(connection.to.name)}</strong>
+    <button type="button" data-ad-hoc-connection-remove data-index="${index}" aria-label="Remove connection">×</button>
+  </div>`).join('');
+  updateAdHocPreference();
+  renderWormholeStatuses();
+  if (!state.settingAdHocRoute && !$('ad-hoc-route-status').textContent.trim()) {
+    setAdHocStatus(selectedCount
+      ? `${selectedCount} online pilot${selectedCount === 1 ? '' : 's'} selected.`
+      : onlineCharacters.length
+        ? 'Choose a destination and one or more online pilots.'
+        : 'No online pilots are available.');
+  }
+}
+
+function openAdHocRouteDialog() {
+  hideSystemAutocomplete();
+  $('ad-hoc-route-form').reset();
+  state.adHocCharacterIds = new Set();
+  state.adHocAvoidSystems = [];
+  state.adHocConnections = [];
+  state.adHocWormholeHubs = new Set();
+  state.settingAdHocRoute = false;
+  $('ad-hoc-security-penalty-output').textContent = '50';
+  setAdHocStatus();
+  renderAdHocRouteDialog();
+  if (!$('ad-hoc-route-dialog').open) $('ad-hoc-route-dialog').showModal();
+  setTimeout(() => $('ad-hoc-destination').focus(), 50);
+}
+
+function selectAllAdHocPilots(selected) {
+  state.adHocCharacterIds = new Set(selected ? state.characters.filter(isCharacterOnline).map((character) => character.id) : []);
+  setAdHocStatus();
+  renderAdHocRouteDialog();
+}
+
+function addAdHocAvoidSystem() {
+  const input = $('ad-hoc-avoid-input');
+  const query = input.value.trim();
+  if (!query) return false;
+  const system = resolveSystem(query, 'Avoid system');
+  if (state.adHocAvoidSystems.some((item) => item.id === system.id)) throw new Error(`${system.name} is already in this list.`);
+  state.adHocAvoidSystems.push(system);
+  input.value = '';
+  renderAdHocRouteDialog();
+  input.focus();
+  return true;
+}
+
+function addAdHocConnection() {
+  const fromInput = $('ad-hoc-connection-from');
+  const toInput = $('ad-hoc-connection-to');
+  const fromQuery = fromInput.value.trim();
+  const toQuery = toInput.value.trim();
+  if (!fromQuery && !toQuery) return false;
+  if (!fromQuery || !toQuery) throw new Error('Choose both systems for the one-way connection.');
+  const from = resolveSystem(fromQuery, 'Connection origin');
+  const to = resolveSystem(toQuery, 'Connection destination');
+  if (from.id === to.id) throw new Error('A connection must join two different systems.');
+  if (state.adHocConnections.some((item) => item.from.id === from.id && item.to.id === to.id)) {
+    throw new Error(`${from.name} → ${to.name} is already included.`);
+  }
+  state.adHocConnections.push({ from, to });
+  fromInput.value = '';
+  toInput.value = '';
+  renderAdHocRouteDialog();
+  fromInput.focus();
+  return true;
+}
+
+function handleAdHocBuilderAction(action) {
+  try {
+    action();
+    setAdHocStatus();
+    renderAdHocRouteDialog();
+  } catch (error) {
+    setAdHocStatus(error.message, true);
+    toast(error.message, 'error');
+  }
+}
+
+function flushAdHocInputs() {
+  if ($('ad-hoc-avoid-input').value.trim()) addAdHocAvoidSystem();
+  if ($('ad-hoc-connection-from').value.trim() || $('ad-hoc-connection-to').value.trim()) addAdHocConnection();
+}
+
 function canClearCharacterRoute(character) {
-  return isCharacterOnline(character) && Boolean(character.location?.stop?.id || character.location?.id) && !character.locationError;
+  const destination = character.location?.stop || character.location;
+  return isCharacterOnline(character)
+    && Boolean(destination?.id)
+    && !character.locationError
+    && canSetEsiWaypoint(destination);
 }
 
 function renderClearRoutesDialog() {
@@ -1333,7 +1815,10 @@ function renderClearRoutesDialog() {
     const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
     const selectable = canClearCharacterRoute(character) && !state.clearingRoutes;
     const detail = online ? `Online · ${location}` : `Offline · ${location}`;
-    return `<label class="character-option ${selectable ? '' : 'is-disabled'} ${online ? '' : 'is-offline'}" ${selectable ? '' : 'title="Only online pilots with a known location can have their route cleared"'}>
+    const unavailableReason = online && character.location && !canSetEsiWaypoint(character.location.stop || character.location)
+      ? 'Thera and other wormhole-only systems cannot be submitted as ESI waypoints'
+      : 'Only online pilots with a known location can have their route cleared';
+    return `<label class="character-option ${selectable ? '' : 'is-disabled'} ${online ? '' : 'is-offline'}" ${selectable ? '' : `title="${escapeHtml(unavailableReason)}"`}>
       <input type="checkbox" value="${character.id}" ${state.clearRouteCharacterIds.has(character.id) ? 'checked' : ''} ${selectable ? '' : 'disabled'}>
       <span><img src="${portraitUrl(character.id, 64)}" alt=""><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(detail)}</small></span>
     </label>`;
@@ -1382,11 +1867,11 @@ async function clearSelectedPilotRoutes() {
     status.textContent = `Checking ${selectedCharacter.name} · ${index + 1} of ${selected.length}…`;
     await waitForPaint();
     try {
-      const character = await refreshCharacterPresence(selectedCharacter, true);
+      const character = await refreshCharacterPresence(selectedCharacter, true, false);
       if (!isCharacterOnline(character)) throw new Error('Pilot is offline.');
       const destinationId = Number(character.location?.stop?.id || character.location?.id);
-      if (!Number.isSafeInteger(destinationId) || destinationId <= 0 || character.locationError) {
-        throw new Error('Current location is unavailable.');
+      if (!Number.isSafeInteger(destinationId) || destinationId <= 0 || character.locationError || !canClearCharacterRoute(character)) {
+        throw new Error('Current location cannot be submitted as an ESI waypoint.');
       }
       status.textContent = `Clearing ${character.name}’s route…`;
       await waitForPaint();
@@ -1433,6 +1918,126 @@ async function clearSelectedPilotRoutes() {
   toast(`Cleared ${successful.length} pilot route${successful.length === 1 ? '' : 's'}.`);
 }
 
+async function setAdHocRoute() {
+  flushAdHocInputs();
+  const destination = resolveStop($('ad-hoc-destination').value, 'Destination');
+  const selected = state.characters.filter((character) => state.adHocCharacterIds.has(character.id));
+  if (!selected.length) throw new Error('Select at least one online pilot before setting the route.');
+
+  const seed = buildRoute({
+    name: `To ${destination.name}`,
+    mode: 'standard',
+    originMode: 'character',
+    origin: null,
+    stops: [destination],
+    avoidSystems: state.adHocAvoidSystems,
+    connections: state.adHocConnections,
+    wormholeHubs: selectedAdHocWormholeHubs(),
+    assignedCharacterIds: selected.map((character) => character.id),
+    preference: document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || 'Shorter',
+    securityPenalty: $('ad-hoc-security-penalty').value,
+    status: 'ready',
+    notes: '',
+    calculations: []
+  });
+  const calculations = [];
+  const successful = [];
+  const failed = [];
+
+  if (seed.wormholeHubs.length) {
+    setAdHocStatus('Refreshing live wormhole connections…');
+    await ensureWormholeConnections(seed);
+  }
+
+  for (let pilotIndex = 0; pilotIndex < selected.length; pilotIndex += 1) {
+    const selectedCharacter = selected[pilotIndex];
+    setAdHocStatus(`Checking ${selectedCharacter.name} · ${pilotIndex + 1} of ${selected.length}…`);
+    await waitForPaint();
+    try {
+      const character = await refreshCharacterPresence(selectedCharacter, true, false);
+      if (!isCharacterOnline(character)) throw new Error('Pilot is offline.');
+      if (!character.location || character.locationError) throw new Error('Current location is unavailable.');
+
+      setAdHocStatus(`Calculating ${character.name}’s route…`);
+      await waitForPaint();
+      const [calculation] = calculateAssignedItineraries(seed, [character]);
+      if (!calculation) throw new Error('A route could not be calculated from the pilot’s current location.');
+      const action = initialNavigationAction(seed, calculation, character);
+      let sentWaypointKey = null;
+      if (action?.kind === 'waypoint') {
+        if (!canSetEsiWaypoint(action.destination)) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
+        setAdHocStatus(`Setting ${character.name} · ${action.destination.name}…`);
+        await waitForPaint();
+        await esi.setWaypoint(character.id, action.destination.id, true);
+        sentWaypointKey = action.key;
+      } else if (action?.kind === 'wormhole') {
+        setAdHocStatus(`${character.name} is at the wormhole · warp to SIG ${action.wormhole.signatureId}…`);
+      } else if (canSetEsiWaypoint(destination)) {
+        setAdHocStatus(`Setting ${character.name} · ${destination.name}…`);
+        await waitForPaint();
+        await esi.setWaypoint(character.id, destination.id, true);
+      }
+      calculations.push(calculation);
+      successful.push({ character, sentWaypointKey });
+    } catch (error) {
+      failed.push({ character: selectedCharacter, error });
+    }
+  }
+
+  if (successful.length) {
+    const now = new Date().toISOString();
+    const successfulIds = new Set(successful.map(({ character }) => character.id));
+    const changedRoutes = state.routes.filter((route) => (
+      (route.assignedCharacterIds || []).some((characterId) => successfulIds.has(Number(characterId)))
+    )).map((route) => ({
+      ...route,
+      assignedCharacterIds: (route.assignedCharacterIds || []).filter((characterId) => !successfulIds.has(Number(characterId))),
+      calculations: ensureReferenceCalculation((route.calculations || [])
+        .filter((calculation) => calculation.characterId == null || !successfulIds.has(Number(calculation.characterId)))),
+      updatedAt: now
+    }));
+    const route = buildRoute({
+      ...seed,
+      assignedCharacterIds: [...successfulIds],
+      calculations: ensureReferenceCalculation(calculations),
+      lastCalculatedAt: now,
+      lastSentAt: now
+    }, seed);
+    await store.putMany('routes', [...changedRoutes, route]);
+    const routeChanges = new Map(changedRoutes.map((changedRoute) => [changedRoute.id, changedRoute]));
+    state.routes = state.routes.map((existingRoute) => routeChanges.get(existingRoute.id) || existingRoute);
+    state.routes.push(route);
+
+    const changedCharacters = successful.map(({ character, sentWaypointKey }) => {
+      const assignment = assignedPilotProgress(character);
+      if (!assignment) return character;
+      return {
+        ...character,
+        routeProgress: {
+          ...assignment.progress,
+          sentWaypointKey,
+          waypointAttemptKey: sentWaypointKey,
+          waypointAttemptedAt: sentWaypointKey ? now : null,
+          waypointError: null
+        }
+      };
+    });
+    await store.putMany('characters', changedCharacters);
+    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
+    renderAll();
+    toast(`Route to ${destination.name} set for ${successful.length} pilot${successful.length === 1 ? '' : 's'}.`);
+  }
+
+  state.adHocCharacterIds = new Set(failed.map(({ character }) => character.id));
+  if (failed.length) {
+    const details = failed.map(({ character, error }) => `${character.name}: ${error.message}`).join(' · ');
+    throw new Error(`${successful.length ? `Set ${successful.length} of ${selected.length} routes. ` : ''}${details}`);
+  }
+
+  $('ad-hoc-route-dialog').close();
+}
+
 async function saveRouteAssignments(event) {
   event.preventDefault();
   const route = currentAssignmentRoute();
@@ -1444,29 +2049,38 @@ async function saveRouteAssignments(event) {
   const calculations = [];
   const successful = [];
   const failed = [];
-  const seed = { ...route, assignedCharacterIds: selected.map((character) => character.id), stopAssignments: [], calculations: [] };
+  const seed = {
+    ...route,
+    wormholeHubs: selectedAssignmentWormholeHubs(),
+    assignedCharacterIds: selected.map((character) => character.id),
+    stopAssignments: [],
+    calculations: []
+  };
+
+  status.textContent = 'Refreshing live wormhole connections…';
+  await ensureWormholeConnections(seed);
 
   for (let pilotIndex = 0; pilotIndex < selected.length; pilotIndex += 1) {
     const selectedCharacter = selected[pilotIndex];
     status.textContent = `Checking ${selectedCharacter.name} · ${pilotIndex + 1} of ${selected.length}…`;
     await waitForPaint();
     try {
-      const character = await refreshCharacterPresence(selectedCharacter, true);
+      const character = await refreshCharacterPresence(selectedCharacter, true, false);
       if (!isCharacterOnline(character)) throw new Error('Pilot is offline.');
 
       status.textContent = `Calculating ${character.name}’s route…`;
       await waitForPaint();
       const [calculation] = calculateAssignedItineraries(seed, [character]);
       if (!calculation) throw new Error('A route could not be calculated from the pilot’s current location.');
-      const waypoints = autopilotStopsFor({ ...seed, calculations: [calculation] }, character.id);
-      if (!waypoints.length) throw new Error('The route has no waypoints beyond the pilot’s current location.');
-
-      for (let waypointIndex = 0; waypointIndex < waypoints.length; waypointIndex += 1) {
-        status.textContent = `Setting ${character.name} · waypoint ${waypointIndex + 1} of ${waypoints.length}…`;
-        await esi.setWaypoint(character.id, waypoints[waypointIndex].id, waypointIndex === 0);
+      const action = initialNavigationAction(seed, calculation, character);
+      if (action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination)) {
+        status.textContent = `Setting ${character.name} · ${action.destination.name}…`;
+        await esi.setWaypoint(character.id, action.destination.id, true);
+      } else if (action?.kind === 'wormhole') {
+        status.textContent = `${character.name} is at the wormhole · warp to SIG ${action.wormhole.signatureId}…`;
       }
       calculations.push(calculation);
-      successful.push(character);
+      successful.push({ character, action });
     } catch (error) {
       failed.push({ character: selectedCharacter, error });
     }
@@ -1476,13 +2090,31 @@ async function saveRouteAssignments(event) {
     const now = new Date().toISOString();
     const updated = buildRoute({
       ...seed,
-      assignedCharacterIds: successful.map((character) => character.id),
+      assignedCharacterIds: successful.map(({ character }) => character.id),
       calculations: ensureReferenceCalculation(calculations),
       lastCalculatedAt: now,
       lastSentAt: now
     }, route);
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
+    const changedCharacters = successful.map(({ character, action }) => {
+      const assignment = assignedPilotProgress(character);
+      if (!assignment) return character;
+      const sent = action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination) ? action.key : null;
+      return {
+        ...character,
+        routeProgress: {
+          ...assignment.progress,
+          sentWaypointKey: sent,
+          waypointAttemptKey: sent,
+          waypointAttemptedAt: sent ? now : null,
+          waypointError: null
+        }
+      };
+    });
+    await store.putMany('characters', changedCharacters);
+    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
   }
 
   renderHeader();
@@ -1501,12 +2133,13 @@ async function saveRouteAssignments(event) {
 async function sendRouteToAutopilot(route) {
   const assigned = selectedCharacters(route);
   if (!assigned.length) throw new Error('Assign at least one connected character first.');
+  await ensureWormholeConnections(route);
   const button = $('detail-send');
   setBusy(button, true, 'Checking pilots…');
   const checked = [];
   for (const character of assigned) {
     try {
-      checked.push(await refreshCharacterPresence(character, true));
+      checked.push(await refreshCharacterPresence(character, true, false));
     } catch (_) {
       // An unknown presence state is unavailable for autopilot services.
     }
@@ -1524,30 +2157,33 @@ async function sendRouteToAutopilot(route) {
   let calculations = [...(route.calculations || [])];
   for (const character of characters) {
     try {
-      if (route.originMode !== 'fixed' && character.location && !character.locationError) {
-        const origin = resolveSystem(character.location.id, `${character.name}’s location`);
-        const result = calculateSeedItinerary(route, origin, character.id);
-        if (!result) {
-          results.push({ character, ok: true });
-          continue;
-        }
-        const calculation = {
-          key: String(character.id),
-          characterId: character.id,
-          origin: result.origin,
-          systems: result.systems,
-          stops: result.stops,
-          jumpCount: Math.max(0, result.systems.length - 1),
-          calculatedAt: new Date().toISOString()
-        };
-        calculations = calculations.filter((item) => item.characterId !== character.id);
-        calculations.push(calculation);
+      let origin = route.origin;
+      if (route.originMode === 'character') {
+        if (!character.location || character.locationError) throw new Error('Current location is unavailable.');
+        origin = resolveSystem(character.location.id, `${character.name}’s location`);
       }
-      const stops = autopilotStopsFor({ ...route, calculations }, character.id);
-      for (let index = 0; index < stops.length; index += 1) {
-        await esi.setWaypoint(character.id, stops[index].id, index === 0);
+      const result = calculateSeedItinerary(route, origin, character.id);
+      if (!result) {
+        results.push({ character, ok: true, action: null });
+        continue;
       }
-      results.push({ character, ok: true });
+      const calculation = {
+        key: String(character.id),
+        characterId: character.id,
+        origin: result.origin,
+        systems: result.systems,
+        stops: result.stops,
+        wormholeSteps: result.wormholeSteps,
+        jumpCount: Math.max(0, result.systems.length - 1),
+        calculatedAt: new Date().toISOString()
+      };
+      calculations = calculations.filter((item) => item.characterId !== character.id);
+      calculations.push(calculation);
+      const action = initialNavigationAction(route, calculation, character);
+      if (action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination)) {
+        await esi.setWaypoint(character.id, action.destination.id, true);
+      }
+      results.push({ character, calculation, action, ok: true });
     } catch (error) {
       results.push({ character, ok: false, error });
     }
@@ -1564,6 +2200,24 @@ async function sendRouteToAutopilot(route) {
     };
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
+    const changedCharacters = successful.map(({ character, action }) => {
+      const assignment = assignedPilotProgress(character);
+      if (!assignment) return character;
+      const sent = action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination) ? action.key : null;
+      return {
+        ...character,
+        routeProgress: {
+          ...assignment.progress,
+          sentWaypointKey: sent,
+          waypointAttemptKey: sent,
+          waypointAttemptedAt: sent ? updated.lastSentAt : null,
+          waypointError: null
+        }
+      };
+    });
+    await store.putMany('characters', changedCharacters);
+    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     renderRoutes();
   }
   setBusy(button, false);
@@ -1677,6 +2331,7 @@ async function eraseAllData() {
 function bindEvents() {
   bindSystemAutocomplete();
   document.querySelectorAll('[data-view-target]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.viewTarget)));
+  $('header-ad-hoc-route').addEventListener('click', openAdHocRouteDialog);
   $('header-clear-routes').addEventListener('click', openClearRoutesDialog);
   $('header-new-route').addEventListener('click', () => openRouteEditor());
   $('header-add-character').addEventListener('click', beginAuthorization);
@@ -1723,6 +2378,34 @@ function bindEvents() {
   });
   $('route-mode').addEventListener('change', updateRouteMode);
   $('route-origin-mode').addEventListener('change', updateOriginMode);
+  ['route-wormhole-thera', 'route-wormhole-turnur'].forEach((id) => {
+    $(id).addEventListener('change', () => {
+      renderWormholeStatuses();
+      if (selectedEditorWormholeHubs().length) refreshWormholeConnections().catch(() => {});
+    });
+  });
+  ['assignment-wormhole-thera', 'assignment-wormhole-turnur'].forEach((id) => {
+    $(id).addEventListener('change', () => {
+      state.assignmentWormholeHubs = new Set(normalizeWormholeHubs([
+        $('assignment-wormhole-thera').checked ? 'thera' : null,
+        $('assignment-wormhole-turnur').checked ? 'turnur' : null
+      ]));
+      $('route-assignment-status').classList.remove('is-error');
+      renderWormholeStatuses();
+      if (state.assignmentWormholeHubs.size) refreshWormholeConnections().catch(() => {});
+    });
+  });
+  ['ad-hoc-wormhole-thera', 'ad-hoc-wormhole-turnur'].forEach((id) => {
+    $(id).addEventListener('change', () => {
+      state.adHocWormholeHubs = new Set(normalizeWormholeHubs([
+        $('ad-hoc-wormhole-thera').checked ? 'thera' : null,
+        $('ad-hoc-wormhole-turnur').checked ? 'turnur' : null
+      ]));
+      setAdHocStatus();
+      renderAdHocRouteDialog();
+      if (state.adHocWormholeHubs.size) refreshWormholeConnections().catch(() => {});
+    });
+  });
   $('route-coverage-type').addEventListener('change', () => {
     hideSystemAutocomplete();
     state.editorCoverageArea = null;
@@ -1854,6 +2537,83 @@ function bindEvents() {
       if ($('route-assignment').open) renderRouteAssignment();
     }
   });
+  $('ad-hoc-character-options').addEventListener('change', (event) => {
+    const input = event.target.closest('input[type="checkbox"]');
+    if (!input) return;
+    const characterId = Number(input.value);
+    const character = state.characters.find((item) => item.id === characterId);
+    if (!isCharacterOnline(character)) {
+      input.checked = false;
+      return;
+    }
+    if (input.checked) state.adHocCharacterIds.add(characterId);
+    else state.adHocCharacterIds.delete(characterId);
+    setAdHocStatus();
+    renderAdHocRouteDialog();
+  });
+  $('ad-hoc-select-all').addEventListener('click', () => selectAllAdHocPilots(true));
+  $('ad-hoc-select-none').addEventListener('click', () => selectAllAdHocPilots(false));
+  $('ad-hoc-avoid-add').addEventListener('click', () => handleAdHocBuilderAction(addAdHocAvoidSystem));
+  $('ad-hoc-connection-add').addEventListener('click', () => handleAdHocBuilderAction(addAdHocConnection));
+  [
+    ['ad-hoc-avoid-input', addAdHocAvoidSystem],
+    ['ad-hoc-connection-from', addAdHocConnection],
+    ['ad-hoc-connection-to', addAdHocConnection]
+  ].forEach(([id, action]) => {
+    $(id).addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      handleAdHocBuilderAction(action);
+    });
+  });
+  $('ad-hoc-avoid-input').addEventListener('change', () => {
+    if (state.graph.resolve($('ad-hoc-avoid-input').value)) handleAdHocBuilderAction(addAdHocAvoidSystem);
+  });
+  ['ad-hoc-connection-from', 'ad-hoc-connection-to'].forEach((id) => {
+    $(id).addEventListener('change', () => {
+      if (state.graph.resolve($('ad-hoc-connection-from').value) && state.graph.resolve($('ad-hoc-connection-to').value)) {
+        handleAdHocBuilderAction(addAdHocConnection);
+      }
+    });
+  });
+  $('ad-hoc-avoid-list').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-ad-hoc-avoid-remove]');
+    if (!button) return;
+    state.adHocAvoidSystems.splice(Number(button.dataset.index), 1);
+    setAdHocStatus();
+    renderAdHocRouteDialog();
+  });
+  $('ad-hoc-connection-list').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-ad-hoc-connection-remove]');
+    if (!button) return;
+    state.adHocConnections.splice(Number(button.dataset.index), 1);
+    setAdHocStatus();
+    renderAdHocRouteDialog();
+  });
+  document.querySelectorAll('input[name="ad-hoc-preference"]').forEach((input) => input.addEventListener('change', updateAdHocPreference));
+  $('ad-hoc-security-penalty').addEventListener('input', () => { $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value; });
+  $('ad-hoc-route-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = $('ad-hoc-route-submit');
+    const closeButtons = document.querySelectorAll('[data-close-dialog="ad-hoc-route-dialog"]');
+    state.settingAdHocRoute = true;
+    setAdHocStatus('Preparing route…');
+    closeButtons.forEach((closeButton) => { closeButton.disabled = true; });
+    renderAdHocRouteDialog();
+    setBusy(button, true, 'Setting route…');
+    try {
+      await setAdHocRoute();
+    } catch (error) {
+      console.error(error);
+      setAdHocStatus(error.message, true);
+      toast(error.message, 'error');
+    } finally {
+      state.settingAdHocRoute = false;
+      setBusy(button, false);
+      closeButtons.forEach((closeButton) => { closeButton.disabled = false; });
+      if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
+    }
+  });
   $('clear-routes-character-options').addEventListener('change', (event) => {
     const input = event.target.closest('input[type="checkbox"]');
     if (!input) return;
@@ -1896,7 +2656,10 @@ function bindEvents() {
       if ($('clear-routes-dialog').open) renderClearRoutesDialog();
     }
   });
-  document.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => $(button.dataset.closeDialog).close()));
+  document.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => {
+    hideSystemAutocomplete();
+    $(button.dataset.closeDialog).close();
+  }));
   $('detail-edit').addEventListener('click', () => { const route = currentDetailRoute(); if (route) { $('route-detail').close(); openRouteEditor(route); } });
   $('detail-duplicate').addEventListener('click', () => { const route = currentDetailRoute(); if (route) copyRoute(route); });
   $('detail-delete').addEventListener('click', () => { const route = currentDetailRoute(); if (route) deleteRoute(route); });
@@ -1958,6 +2721,15 @@ async function initialize() {
     prepareSystemAutocomplete();
     bindEvents();
     renderAll();
+    if (state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)) {
+      try {
+        await refreshWormholeConnections();
+        await hydrateSavedWormholeSteps();
+        renderRoutes();
+      } catch (error) {
+        console.warn('Could not preload live EVE-Scout connections:', error);
+      }
+    }
     const params = new URLSearchParams(window.location.search);
     if (params.has('authorized')) {
       toast(`${params.get('authorized')} connected.`);

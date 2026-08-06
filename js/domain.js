@@ -1,3 +1,5 @@
+import { normalizeWormholeHubs } from './eve-scout.js';
+
 export const ROUTE_STATUSES = Object.freeze(['draft', 'ready', 'archived']);
 export const ROUTE_PREFERENCES = Object.freeze(['Shorter', 'Safer', 'LessSecure']);
 const SECURITY_COLORS = Object.freeze({
@@ -150,6 +152,85 @@ export function autopilotStopsFor(route, characterId = null) {
   return uniqueStops(stopsForCharacter(route, characterId));
 }
 
+function routeCalculationFor(route, characterId = null) {
+  const calculations = route?.calculations || [];
+  if (characterId != null) {
+    const assigned = calculations.find((item) => Number(item.characterId) === Number(characterId));
+    if (assigned) return assigned;
+  }
+  return calculations.find((item) => item.characterId == null) || calculations[0] || null;
+}
+
+export function routeNavigationStages(route, characterId = null) {
+  const calculation = routeCalculationFor(route, characterId);
+  if (!calculation) return [];
+  const specifiedStops = route.mode === 'coverage' ? calculation.stops || route.stops || [] : route.stops || [];
+  const stopIndexes = routeStopSystemIndexes(calculation.systems, specifiedStops);
+  const waypointStages = specifiedStops.flatMap((stop, index) => {
+    const systemIndex = stopIndexes[index];
+    if (!Number.isInteger(systemIndex)) return [];
+    return [{
+      key: `waypoint:${index}:${Number(stop.id)}`,
+      kind: 'waypoint',
+      systemIndex,
+      destination: stop
+    }];
+  });
+  const wormholeStages = (calculation.wormholeSteps || []).map((wormhole, index) => ({
+    key: wormhole.key || `wormhole:${wormhole.id}:${wormhole.fromIndex}:${wormhole.toIndex}:${index}`,
+    kind: 'wormhole',
+    systemIndex: Number(wormhole.fromIndex),
+    completesAtIndex: Number(wormhole.toIndex),
+    wormhole
+  }));
+  return [...waypointStages, ...wormholeStages].sort((left, right) => {
+    const bySystem = left.systemIndex - right.systemIndex;
+    if (bySystem) return bySystem;
+    if (left.kind !== right.kind) return left.kind === 'waypoint' ? -1 : 1;
+    return left.key.localeCompare(right.key);
+  });
+}
+
+export function remainingRouteWormholes(route, characterId = null, progress = null) {
+  const calculation = routeCalculationFor(route, characterId);
+  if (!calculation) return [];
+  const currentIndex = Number.isInteger(progress?.systemIndex) ? progress.systemIndex : -1;
+  return [...(calculation.wormholeSteps || [])]
+    .filter((wormhole) => Number(wormhole.toIndex) > currentIndex)
+    .sort((left, right) => Number(left.fromIndex) - Number(right.fromIndex));
+}
+
+function waypointReached(stage, character, currentIndex) {
+  if (currentIndex > stage.systemIndex) return true;
+  if (currentIndex < stage.systemIndex) return false;
+  const destination = stage.destination;
+  if (destination.kind === 'station' || destination.kind === 'structure') {
+    return Number(character?.location?.stop?.id) === Number(destination.id);
+  }
+  return Number(character?.location?.id) === Number(destination.systemId ?? destination.id);
+}
+
+export function nextRouteNavigationAction(route, character, progress) {
+  const currentIndex = Number.isInteger(progress?.systemIndex) ? progress.systemIndex : -1;
+  const currentSystemId = Number(character?.location?.id);
+  for (const stage of routeNavigationStages(route, character?.id)) {
+    if (stage.kind === 'waypoint') {
+      if (waypointReached(stage, character, currentIndex)) continue;
+      return stage;
+    }
+    if (currentIndex >= stage.completesAtIndex) continue;
+    if (currentIndex === stage.systemIndex && currentSystemId === Number(stage.wormhole.from.id)) return stage;
+    return {
+      key: `approach:${stage.key}`,
+      kind: 'waypoint',
+      systemIndex: stage.systemIndex,
+      destination: stage.wormhole.from,
+      wormhole: stage.wormhole
+    };
+  }
+  return null;
+}
+
 export function routeRequestBody(route) {
   const preference = ROUTE_PREFERENCES.includes(route.preference) ? route.preference : 'Shorter';
   const penalty = Math.min(100, Math.max(0, Math.round(Number(route.securityPenalty ?? 50))));
@@ -209,6 +290,34 @@ export function buildRoute(input, previous = null) {
   const calculations = (input.calculations || []).map((calculation) => {
     const systems = (calculation.systems || []).map((system) => normalizeSystem(system, 'calculated route system'));
     const stops = (calculation.stops || []).map((stop) => normalizeStop(stop, 'calculated coverage stop'));
+    const wormholeSteps = (calculation.wormholeSteps || []).map((step, index) => {
+      const fromIndex = Number(step.fromIndex);
+      const toIndex = Number(step.toIndex);
+      const from = normalizeSystem(step.from, `wormhole step ${index + 1} origin`);
+      const to = normalizeSystem(step.to, `wormhole step ${index + 1} destination`);
+      const signatureId = String(step.signatureId || '').trim().toUpperCase();
+      const destinationSignatureId = String(step.destinationSignatureId || '').trim().toUpperCase();
+      if (!Number.isInteger(fromIndex) || toIndex !== fromIndex + 1 || systems[fromIndex]?.id !== from.id || systems[toIndex]?.id !== to.id) {
+        throw new Error(`Wormhole step ${index + 1} does not match the calculated route.`);
+      }
+      if (!signatureId || !destinationSignatureId || !Number.isFinite(Date.parse(step.expiresAt))) {
+        throw new Error(`Wormhole step ${index + 1} is missing its signatures or expiration.`);
+      }
+      return {
+        id: String(step.id || `${from.id}:${to.id}`),
+        key: String(step.key || `wormhole:${step.id || `${from.id}:${to.id}`}:${fromIndex}:${toIndex}`),
+        hub: normalizeWormholeHubs([step.hub])[0] || '',
+        from,
+        to,
+        fromIndex,
+        toIndex,
+        signatureId,
+        destinationSignatureId,
+        expiresAt: new Date(step.expiresAt).toISOString(),
+        maxShipSize: String(step.maxShipSize || 'unknown'),
+        wormholeType: String(step.wormholeType || 'Unknown')
+      };
+    });
     const characterId = calculation.characterId == null ? null : Number(calculation.characterId);
     return {
       key: String(calculation.key || characterId || 'fixed'),
@@ -216,6 +325,7 @@ export function buildRoute(input, previous = null) {
       origin: normalizeSystem(calculation.origin, 'calculated route origin'),
       systems,
       stops,
+      wormholeSteps,
       jumpCount: Math.max(0, systems.length - 1),
       calculatedAt: calculation.calculatedAt || now
     };
@@ -242,6 +352,7 @@ export function buildRoute(input, previous = null) {
       from: normalizeSystem(connection.from, 'connection origin'),
       to: normalizeSystem(connection.to, 'connection destination')
     })),
+    wormholeHubs: normalizeWormholeHubs(input.wormholeHubs),
     assignedCharacterIds,
     stopAssignments: [],
     calculations,

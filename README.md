@@ -8,14 +8,15 @@ Just The Trip is a static, browser-only EVE Online route planner. It keeps route
 - Check each character's online state through ESI and only request live services for online pilots.
 - Read each online character's current solar system and active ship through ESI.
 - Create routes from a fixed system or each assigned character's live location.
+- Set an immediate “Take me to…” route for one or more online pilots with destination autocomplete and the full routing options, without a separate assignment step.
 - Start new routes from the selected online character's live location by default.
 - Add solar systems or NPC stations as ordered stops, or insert a selected pilot's exact live station/structure location; the final stop is the route endpoint.
 - Calculate shortest, safer, and less-secure routes in-browser with A*.
 - Generate complete region or constellation coverage routes from the bundled SDE, with a fixed, live, or automatically optimized starting system.
-- Assign every coverage stop to one or several pilots, or balance stops automatically.
+- Optionally include completed, unexpired public Thera and Turnur wormhole connections in A* route calculations.
 - Create and edit routes without assigning characters, then staff each route from its flight-board action.
-- Assign one saved route to multiple characters and distribute coverage stops from the dedicated pilot dialog.
-- Send route stops to every assigned character's in-game autopilot.
+- Assign one saved route to multiple characters; every selected pilot receives the complete route.
+- Stage one reachable ESI waypoint at a time for every assigned character and advance it from live location updates.
 - Create, inspect, update, duplicate, archive, and delete routes.
 - Avoid systems and add custom one-way connections such as jump bridges.
 - Import and export portable route JSON without exposing character tokens.
@@ -87,6 +88,12 @@ node scripts/build-sde.mjs \
   --out data/universe.json \
   --version-out data/sde-version.json
 ```
+
+## Live wormhole shortcuts
+
+Each route can independently include Thera, Turnur, or both as shortcuts. The choice can be made while editing the route or immediately before assigning it to pilots. Just The Trip reads completed, unexpired public connections from the [EVE-Scout API](https://api.eve-scout.com/ui/) and caches the result in memory for five minutes. The most recently assigned choice is saved on the route and persists with route exports; live signatures do not.
+
+EVE autopilot cannot perform a wormhole traversal. Just The Trip therefore stages route delivery: it sends only the next gate-reachable waypoint, waits for location polling to confirm the pilot reached it, and then adds the next one. At a wormhole system, Route Progress shows the exact signature to warp to and tracks the pilot through the destination system without submitting Thera or another wormhole-only system to ESI. Wormhole instructions, signatures, and expiration times are retained with the calculated pilot route. The planner currently does not filter connections by the active ship's mass limit.
 
 ## Privacy and backups
 

@@ -79,9 +79,14 @@
           <section class="route-board-column pilot-progress-column" aria-labelledby="pilot-progress-heading">
             <div class="board-column-heading">
               <h2 id="pilot-progress-heading">Route Progress</h2>
-              <button id="header-clear-routes" class="icon-button clear-routes-button" type="button" aria-label="Clear pilot routes" title="Clear pilot routes">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 15 8-8 6 6-7 7H7l-3-3Z"></path><path d="m9 12 6 6"></path><path d="M11 20h9"></path></svg>
-              </button>
+              <div class="board-heading-actions">
+                <button id="header-ad-hoc-route" class="icon-button ad-hoc-route-button" type="button" aria-label="Take me to" title="Take me to">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12h15"></path><path d="m13 6 6 6-6 6"></path></svg>
+                </button>
+                <button id="header-clear-routes" class="icon-button clear-routes-button" type="button" aria-label="Clear pilot routes" title="Clear pilot routes">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 15 8-8 6 6-7 7H7l-3-3Z"></path><path d="m9 12 6 6"></path><path d="M11 20h9"></path></svg>
+                </button>
+              </div>
             </div>
             <div class="pilot-column-tools">
               <label class="pilot-filter-toggle">
@@ -91,7 +96,7 @@
               </label>
             </div>
             <div id="assigned-pilots-list" class="pilot-progress-list" aria-live="polite"></div>
-            <p class="progress-note">Progress is tracked while this page is open. After reopening, it catches up from the pilot’s current system when possible; travel completed before moving elsewhere cannot be reconstructed.</p>
+            <p class="progress-note">Only the next reachable ESI waypoint is set. Reaching it unlocks the next; wormhole steps show the signature and remain manual. After reopening, progress catches up from the pilot’s current system when possible.</p>
           </section>
         </div>
       </section>
@@ -245,6 +250,20 @@
           </div>
           <div id="route-avoid-list" class="system-chip-list" aria-live="polite"></div>
         </div>
+        <fieldset class="editor-wide wormhole-fieldset">
+          <legend>Live wormhole shortcuts <small>optional</small></legend>
+          <div class="wormhole-options">
+            <label class="wormhole-option">
+              <input id="route-wormhole-thera" type="checkbox" value="thera">
+              <span><strong>Thera</strong><small>Use active EVE-Scout links</small></span>
+            </label>
+            <label class="wormhole-option">
+              <input id="route-wormhole-turnur" type="checkbox" value="turnur">
+              <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
+            </label>
+          </div>
+          <small id="route-wormhole-status" class="wormhole-status" aria-live="polite">Off. This route uses stargates and custom connections only.</small>
+        </fieldset>
         <div class="field editor-wide system-builder">
           <span>Extra one-way connections <small>optional</small></span>
           <div class="connection-add-row">
@@ -312,6 +331,20 @@
       </div>
       <div class="modal-body">
         <p class="assignment-intro">Choose which online pilots receive this route. Offline pilots are shown for context but cannot be selected.</p>
+        <fieldset class="wormhole-fieldset assignment-wormholes">
+          <legend>Live wormhole shortcuts <small>for this assignment</small></legend>
+          <div class="wormhole-options">
+            <label class="wormhole-option">
+              <input id="assignment-wormhole-thera" type="checkbox" value="thera">
+              <span><strong>Thera</strong><small>Use active EVE-Scout links</small></span>
+            </label>
+            <label class="wormhole-option">
+              <input id="assignment-wormhole-turnur" type="checkbox" value="turnur">
+              <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
+            </label>
+          </div>
+          <small id="assignment-wormhole-status" class="wormhole-status" aria-live="polite">Off. This assignment uses stargates and custom connections only.</small>
+        </fieldset>
         <fieldset class="character-picker assignment-character-picker">
           <legend class="sr-only">Route pilots</legend>
           <div class="builder-heading assignment-character-heading">
@@ -332,6 +365,87 @@
         <p id="route-assignment-status" class="modal-status" aria-live="polite"></p>
         <button class="button button-ghost" type="button" data-close-dialog="route-assignment">Cancel</button>
         <button id="route-assignment-submit" class="button button-primary" type="submit" disabled>Set Routes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ad-hoc-route-dialog" class="modal ad-hoc-route-dialog" aria-labelledby="ad-hoc-route-title">
+    <form id="ad-hoc-route-form" method="dialog">
+      <div class="modal-header">
+        <div><div class="eyebrow">Direct route</div><h2 id="ad-hoc-route-title">Take me to…</h2></div>
+        <button class="modal-close" type="button" data-close-dialog="ad-hoc-route-dialog" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <fieldset id="ad-hoc-controls" class="ad-hoc-controls">
+          <label class="field ad-hoc-destination-field">
+            <span>Destination</span>
+            <input id="ad-hoc-destination" type="text" data-stop-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Solar system or NPC station" required>
+          </label>
+
+          <fieldset class="character-picker ad-hoc-character-picker">
+            <legend class="sr-only">Pilots</legend>
+            <div class="builder-heading assignment-character-heading">
+              <span>Pilots</span>
+              <div class="coverage-assignment-actions">
+                <button id="ad-hoc-select-all" type="button">Select all</button>
+                <button id="ad-hoc-select-none" type="button">None</button>
+              </div>
+            </div>
+            <div id="ad-hoc-character-options"></div>
+            <p id="ad-hoc-character-empty" class="muted">Connect an online pilot before setting a route.</p>
+          </fieldset>
+
+          <fieldset class="preference-fieldset ad-hoc-preference-fieldset">
+            <legend>Route preference</legend>
+            <label><input type="radio" name="ad-hoc-preference" value="Shorter" checked><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
+            <label><input type="radio" name="ad-hoc-preference" value="Safer"><span><strong>Safer</strong><small>Favor high security</small></span></label>
+            <label><input type="radio" name="ad-hoc-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
+          </fieldset>
+          <label id="ad-hoc-security-penalty-field" class="field range-field" hidden>
+            <span>Security strictness <output id="ad-hoc-security-penalty-output">50</output></span>
+            <input id="ad-hoc-security-penalty" type="range" min="0" max="100" value="50">
+          </label>
+
+          <fieldset class="wormhole-fieldset ad-hoc-wormholes">
+            <legend>Live wormhole shortcuts <small>optional</small></legend>
+            <div class="wormhole-options">
+              <label class="wormhole-option">
+                <input id="ad-hoc-wormhole-thera" type="checkbox" value="thera">
+                <span><strong>Thera</strong><small>Use active EVE-Scout links</small></span>
+              </label>
+              <label class="wormhole-option">
+                <input id="ad-hoc-wormhole-turnur" type="checkbox" value="turnur">
+                <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
+              </label>
+            </div>
+            <small id="ad-hoc-wormhole-status" class="wormhole-status" aria-live="polite">Off. This route uses stargates and custom connections only.</small>
+          </fieldset>
+
+          <div class="field system-builder ad-hoc-avoid-builder">
+            <span>Systems to avoid <small>optional</small></span>
+            <div class="system-add-row">
+              <input id="ad-hoc-avoid-input" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Search for a solar system">
+              <button id="ad-hoc-avoid-add" class="button button-ghost" type="button">Avoid system</button>
+            </div>
+            <div id="ad-hoc-avoid-list" class="system-chip-list" aria-live="polite"></div>
+          </div>
+
+          <div class="field system-builder ad-hoc-connection-builder">
+            <span>Extra one-way connections <small>optional</small></span>
+            <div class="connection-add-row">
+              <input id="ad-hoc-connection-from" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="From system">
+              <span aria-hidden="true">→</span>
+              <input id="ad-hoc-connection-to" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="To system">
+              <button id="ad-hoc-connection-add" class="button button-ghost" type="button">Add connection</button>
+            </div>
+            <div id="ad-hoc-connection-list" class="connection-list" aria-live="polite"></div>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <p id="ad-hoc-route-status" class="modal-status" aria-live="polite"></p>
+        <button class="button button-ghost" type="button" data-close-dialog="ad-hoc-route-dialog">Cancel</button>
+        <button id="ad-hoc-route-submit" class="button button-primary" type="submit" disabled>Set Route</button>
       </div>
     </form>
   </dialog>

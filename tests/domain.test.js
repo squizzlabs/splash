@@ -12,7 +12,10 @@ import {
   parseConnectionLines,
   parseList,
   parseRouteImport,
+  nextRouteNavigationAction,
+  remainingRouteWormholes,
   routeRequestBody,
+  routeNavigationStages,
   routeStopSystemIndexes,
   serializeRoutes,
   stopsForCharacter,
@@ -108,19 +111,26 @@ test('dynamic routes support multiple character calculations', () => {
   assert.deepEqual(route.calculations.map((item) => item.jumpCount), [2, 1]);
 });
 
-test('route exports import assignments only for characters on this device', () => {
-  const route = buildRoute({ origin: systems.a, stops: [systems.c], assignedCharacterIds: [9001, 9002] });
+test('route exports retain wormhole hubs and import assignments only for characters on this device', () => {
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.c],
+    wormholeHubs: ['thera', 'turnur'],
+    assignedCharacterIds: [9001, 9002]
+  });
   assert.equal('destination' in route, false);
   assert.equal('waypoints' in route, false);
   const payload = serializeRoutes([route]);
   const [imported] = parseRouteImport(payload, [], [9002]);
   assert.deepEqual(imported.assignedCharacterIds, [9002]);
+  assert.deepEqual(imported.wormholeHubs, ['thera', 'turnur']);
 });
 
 test('duplicated routes start unassigned', () => {
   const route = buildRoute({
     origin: systems.a,
     stops: [systems.c],
+    wormholeHubs: ['TURNUR', 'thera', 'invalid'],
     assignedCharacterIds: [9001],
     calculations: [{ key: '9001', characterId: 9001, origin: systems.a, systems: [systems.a, systems.c] }]
   });
@@ -128,6 +138,7 @@ test('duplicated routes start unassigned', () => {
   assert.deepEqual(copy.assignedCharacterIds, []);
   assert.deepEqual(copy.stopAssignments, []);
   assert.deepEqual(copy.calculations, []);
+  assert.deepEqual(copy.wormholeHubs, ['thera', 'turnur']);
 });
 
 test('coverage routes give every assigned pilot the complete route', () => {
@@ -187,6 +198,91 @@ test('station stops route through their solar system and retain their ESI destin
   assert.deepEqual(itineraryFor(route).map((system) => system.id), [4, 2, 1]);
   assert.deepEqual(autopilotStopsFor(route).map((stop) => stop.id), [2, 60000001]);
   assert.equal(route.stops.at(-1).kind, 'station');
+});
+
+test('wormhole navigation stages approach the hole, show its signature, and never waypoint Thera', () => {
+  const thera = { id: 31000005, name: 'Thera' };
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.c],
+    wormholeHubs: ['thera'],
+    assignedCharacterIds: [9001],
+    calculations: [{
+      key: '9001',
+      characterId: 9001,
+      origin: systems.a,
+      systems: [systems.a, systems.b, thera, systems.c],
+      wormholeSteps: [
+        {
+          id: '10',
+          hub: 'thera',
+          from: systems.b,
+          to: thera,
+          fromIndex: 1,
+          toIndex: 2,
+          signatureId: 'INB-123',
+          destinationSignatureId: 'THR-456',
+          expiresAt: '2026-08-07T00:00:00.000Z',
+          maxShipSize: 'large',
+          wormholeType: 'K162'
+        },
+        {
+          id: '11',
+          hub: 'thera',
+          from: thera,
+          to: systems.c,
+          fromIndex: 2,
+          toIndex: 3,
+          signatureId: 'OUT-789',
+          destinationSignatureId: 'EXT-012',
+          expiresAt: '2026-08-07T00:00:00.000Z',
+          maxShipSize: 'large',
+          wormholeType: 'E587'
+        }
+      ]
+    }]
+  });
+  const character = { id: 9001, location: { id: systems.a.id, stop: { id: systems.a.id, kind: 'system' } } };
+  const stages = routeNavigationStages(route, character.id);
+  assert.deepEqual(stages.map((stage) => [stage.kind, stage.systemIndex]), [
+    ['wormhole', 1],
+    ['wormhole', 2],
+    ['waypoint', 3]
+  ]);
+  assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 0 }).map((step) => step.signatureId), ['INB-123', 'OUT-789']);
+  assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 2 }).map((step) => step.signatureId), ['OUT-789']);
+  assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 3 }), []);
+
+  const approach = nextRouteNavigationAction(route, character, { systemIndex: 0, onRoute: true });
+  assert.equal(approach.kind, 'waypoint');
+  assert.equal(approach.destination.id, systems.b.id);
+  assert.equal(approach.wormhole.signatureId, 'INB-123');
+
+  character.location.id = systems.b.id;
+  const firstHole = nextRouteNavigationAction(route, character, { systemIndex: 1, onRoute: true });
+  assert.equal(firstHole.kind, 'wormhole');
+  assert.equal(firstHole.wormhole.signatureId, 'INB-123');
+
+  character.location.id = thera.id;
+  const theraHole = nextRouteNavigationAction(route, character, { systemIndex: 2, onRoute: true });
+  assert.equal(theraHole.kind, 'wormhole');
+  assert.equal(theraHole.wormhole.signatureId, 'OUT-789');
+
+  const [imported] = parseRouteImport(serializeRoutes([route]), [], [9001]);
+  assert.deepEqual(imported.calculations[0].wormholeSteps.map((step) => step.signatureId), ['INB-123', 'OUT-789']);
+});
+
+test('the next regular waypoint is exposed only after the previous one is reached', () => {
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.b, systems.c],
+    assignedCharacterIds: [9001],
+    calculations: [{ key: '9001', characterId: 9001, origin: systems.a, systems: [systems.a, systems.b, systems.c] }]
+  });
+  const character = { id: 9001, location: { id: systems.a.id, stop: { id: systems.a.id, kind: 'system' } } };
+  assert.equal(nextRouteNavigationAction(route, character, { systemIndex: 0, onRoute: true }).destination.id, systems.b.id);
+  character.location = { id: systems.b.id, stop: { id: systems.b.id, kind: 'system' } };
+  assert.equal(nextRouteNavigationAction(route, character, { systemIndex: 1, onRoute: true }).destination.id, systems.c.id);
 });
 
 test('structure stops route through their solar system and retain their ESI destination ID', () => {
