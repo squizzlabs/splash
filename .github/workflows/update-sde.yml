@@ -1,0 +1,86 @@
+name: Update route graph
+
+on:
+  schedule:
+    - cron: '19 7-20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check SDE release
+        id: sde
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://developers.eveonline.com/static-data/tranquility/latest.jsonl -o /tmp/latest.json
+          if [[ -f data/sde-version.json ]] && node -e "const fs=require('fs');const a=JSON.parse(fs.readFileSync('data/sde-version.json'));const b=JSON.parse(fs.readFileSync('/tmp/latest.json'));process.exit(a.buildNumber===b.buildNumber?0:1)"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download current JSONL SDE
+        if: steps.sde.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fSL https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip -o /tmp/sde.zip
+          mkdir -p /tmp/sde
+          unzip -q /tmp/sde.zip -d /tmp/sde
+      - name: Build compact stargate graph
+        if: steps.sde.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          systems="$(find /tmp/sde -type f -name mapSolarSystems.jsonl -print -quit)"
+          stargates="$(find /tmp/sde -type f -name mapStargates.jsonl -print -quit)"
+          regions="$(find /tmp/sde -type f -name mapRegions.jsonl -print -quit)"
+          constellations="$(find /tmp/sde -type f -name mapConstellations.jsonl -print -quit)"
+          stations="$(find /tmp/sde -type f -name npcStations.jsonl -print -quit)"
+          moons="$(find /tmp/sde -type f -name mapMoons.jsonl -print -quit)"
+          corporations="$(find /tmp/sde -type f -name npcCorporations.jsonl -print -quit)"
+          station_operations="$(find /tmp/sde -type f -name stationOperations.jsonl -print -quit)"
+          test -n "$systems"
+          test -n "$stargates"
+          test -n "$regions"
+          test -n "$constellations"
+          test -n "$stations"
+          test -n "$moons"
+          test -n "$corporations"
+          test -n "$station_operations"
+          node scripts/build-sde.mjs \
+            --systems "$systems" \
+            --stargates "$stargates" \
+            --regions "$regions" \
+            --constellations "$constellations" \
+            --stations "$stations" \
+            --moons "$moons" \
+            --corporations "$corporations" \
+            --station-operations "$station_operations" \
+            --latest /tmp/latest.json \
+            --out data/universe.json \
+            --version-out data/sde-version.json
+      - name: Verify graph and tests
+        if: steps.sde.outputs.changed == 'true'
+        run: |
+          node scripts/validate-sde.mjs --graph data/universe.json
+          npm test
+      - name: Commit updated graph
+        if: steps.sde.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add data/universe.json data/sde-version.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update EVE SDE route graph"
+          git push

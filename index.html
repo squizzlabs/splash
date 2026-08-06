@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="description" content="Plan EVE Online routes for every character, entirely in your browser.">
+  <title>Just The Trip</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="stylesheet" href="./css/app.css">
+  <script type="module" src="./js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Just The Trip home">
+      <svg class="brand-mark" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="22" r="18"></circle>
+        <path d="M28.5 15.5 25 25l-9.5 3.5L19 19z"></path>
+        <circle cx="22" cy="22" r="2.25"></circle>
+      </svg>
+      <span class="brand-type"><strong>JUST THE</strong><span>TRIP</span></span>
+    </a>
+    <p class="brand-slogan">We do the navigating. <strong>You do the explo<span id="slogan-letter">d</span>ing.</strong></p>
+    <nav class="main-nav" aria-label="Primary">
+      <button class="nav-item is-active" type="button" data-view-target="routes">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 21v-8"></path><path d="m12 14-6-6"></path><path d="M6 12V8h4"></path><path d="m12 14 6-6"></path><path d="M14 8h4v4"></path></svg>
+        </span> Routes
+      </button>
+      <button class="nav-item" type="button" data-view-target="characters">
+        <span class="nav-icon nav-character-icon" aria-hidden="true"><img src="https://images.evetech.net/characters/1/portrait?size=64" alt=""></span> Characters
+        <span id="nav-character-count" class="nav-count">0</span>
+      </button>
+      <button class="nav-item" type="button" data-view-target="settings">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"></path><path d="M19.35 13.15a7.7 7.7 0 0 0 .05-1.15 7.7 7.7 0 0 0-.05-1.15l2-1.55-2-3.45-2.45 1a8 8 0 0 0-2-1.15L14.55 3h-5.1L9.1 5.7a8 8 0 0 0-2 1.15l-2.45-1-2 3.45 2 1.55A7.7 7.7 0 0 0 4.6 12c0 .39.02.77.05 1.15l-2 1.55 2 3.45 2.45-1a8 8 0 0 0 2 1.15l.35 2.7h5.1l.35-2.7a8 8 0 0 0 2-1.15l2.45 1 2-3.45-2-1.55Z"></path></svg>
+        </span> Settings
+      </button>
+    </nav>
+    <div class="topbar-actions">
+      <div id="header-characters" class="avatar-stack" aria-label="Connected characters"></div>
+      <button id="header-add-character" class="button button-ghost button-small" type="button">
+        <span aria-hidden="true">◉</span> Add EVE character
+      </button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section id="view-routes" class="app-view is-active" data-view="routes">
+      <section class="route-board" aria-labelledby="route-board-title">
+        <div class="route-board-grid">
+          <section class="route-board-column" aria-labelledby="route-board-title">
+            <div class="board-column-heading">
+              <h2 id="route-board-title">Routes</h2>
+              <button id="header-new-route" class="icon-button new-route-button" type="button" aria-label="New route" title="New route">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+              </button>
+            </div>
+            <div class="route-column-tools">
+              <label class="search-field">
+                <span aria-hidden="true">⌕</span>
+                <span class="sr-only">Search routes</span>
+                <input id="route-search" type="search" placeholder="Search routes">
+              </label>
+              <select id="route-status-filter" aria-label="Filter routes by status">
+                <option value="all">All statuses</option>
+                <option value="ready">Ready</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+              <select id="route-sort" aria-label="Sort routes">
+                <option value="updated">Recently updated</option>
+                <option value="name">Name</option>
+                <option value="jumps">Fewest jumps</option>
+              </select>
+            </div>
+            <div id="routes-list" class="routes-list" aria-live="polite"></div>
+          </section>
+          <section class="route-board-column pilot-progress-column" aria-labelledby="pilot-progress-heading">
+            <div class="board-column-heading">
+              <h2 id="pilot-progress-heading">Route Progress</h2>
+              <button id="header-clear-routes" class="icon-button clear-routes-button" type="button" aria-label="Clear pilot routes" title="Clear pilot routes">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 15 8-8 6 6-7 7H7l-3-3Z"></path><path d="m9 12 6 6"></path><path d="M11 20h9"></path></svg>
+              </button>
+            </div>
+            <div class="pilot-column-tools">
+              <label class="pilot-filter-toggle">
+                <input id="show-offline-pilots" type="checkbox" checked>
+                <span class="toggle-slider" aria-hidden="true"></span>
+                <span>Show offline</span>
+              </label>
+            </div>
+            <div id="assigned-pilots-list" class="pilot-progress-list" aria-live="polite"></div>
+            <p class="progress-note">Progress is tracked while this page is open. After reopening, it catches up from the pilot’s current system when possible; travel completed before moving elsewhere cannot be reconstructed.</p>
+          </section>
+        </div>
+      </section>
+    </section>
+
+    <section id="view-characters" class="app-view" data-view="characters" hidden>
+      <div class="page-heading utility-heading">
+        <h1>Characters</h1>
+        <div class="page-heading-actions">
+          <button id="characters-sync" class="button button-ghost" type="button">↻ Sync pilots</button>
+          <button id="add-character" class="button button-primary" type="button">＋ Add EVE character</button>
+        </div>
+      </div>
+      <div id="characters-list" class="character-grid"></div>
+    </section>
+
+    <section id="view-settings" class="app-view" data-view="settings" hidden>
+      <div class="page-heading utility-heading">
+        <h1>Settings</h1>
+      </div>
+      <div class="settings-grid">
+        <section class="settings-card">
+          <div class="settings-card-heading">
+            <span class="settings-glyph">UI</span>
+            <div><h2>Appearance</h2><p>Choose the view that fits your bridge.</p></div>
+          </div>
+          <label class="field">
+            <span>Theme</span>
+            <select id="theme-select">
+              <option value="system">System's Setting</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Route density</span>
+            <select id="density-select">
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
+        </section>
+        <section class="settings-card">
+          <div class="settings-card-heading">
+            <span class="settings-glyph">SDE</span>
+            <div><h2>Universe data</h2><p>The stargate graph is rebuilt automatically.</p></div>
+          </div>
+          <dl class="settings-facts">
+            <div><dt>Build</dt><dd id="settings-sde-build">Loading</dd></div>
+            <div><dt>Released</dt><dd id="settings-sde-date">—</dd></div>
+            <div><dt>Systems</dt><dd id="settings-system-count">—</dd></div>
+          </dl>
+        </section>
+        <section class="settings-card settings-card-wide">
+          <div class="settings-card-heading">
+            <span class="settings-glyph">I/O</span>
+            <div><h2>Import &amp; export</h2><p>Move route plans into or out of this browser.</p></div>
+          </div>
+          <div class="data-actions">
+            <button id="settings-export" class="button button-ghost" type="button">
+              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 14v5h14v-5"></path></svg>
+              Export routes
+            </button>
+            <button id="settings-import" class="button button-ghost" type="button">
+              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 19h14"></path></svg>
+              Import routes
+            </button>
+          </div>
+        </section>
+        <section class="settings-card settings-card-wide danger-card">
+          <div class="settings-card-heading">
+            <span class="settings-glyph">!</span>
+            <div><h2>Local data</h2><p>Routes, locations, and tokens never leave this browser except when you call EVE services.</p></div>
+          </div>
+          <div class="data-actions">
+            <button id="erase-data" class="button button-danger" type="button">Erase all local data</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span><strong>Just The Trip</strong> · local-first route planning for EVE Online</span>
+    <span>Not affiliated with CCP Games.</span>
+  </footer>
+
+  <input id="import-file" type="file" accept=".json,application/json" hidden>
+
+  <dialog id="route-editor" class="modal route-editor" aria-labelledby="route-editor-title">
+    <form id="route-form" method="dialog">
+      <div class="modal-header">
+        <div><div class="eyebrow">Flight plan</div><h2 id="route-editor-title">New route</h2></div>
+        <button class="modal-close" type="button" data-close-dialog="route-editor" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body editor-grid">
+        <label class="field editor-name">
+          <span>Route name <small>optional</small></span>
+          <input id="route-name" type="text" maxlength="80" placeholder="Jita supply run">
+        </label>
+        <label class="field">
+          <span>Plan type</span>
+          <select id="route-mode">
+            <option value="standard">Ordered stop route</option>
+            <option value="coverage">Region or constellation coverage</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Start from</span>
+          <select id="route-origin-mode">
+            <option id="route-origin-auto-option" value="auto">Optimize the coverage starting system</option>
+            <option value="character">Current character’s location</option>
+            <option value="fixed">A fixed solar system</option>
+          </select>
+        </label>
+        <div id="route-coverage-field" class="field editor-wide" hidden>
+          <span>Coverage area</span>
+          <div class="coverage-area-row">
+            <select id="route-coverage-type" aria-label="Coverage area type">
+              <option value="region">Region</option>
+              <option value="constellation">Constellation</option>
+            </select>
+            <input id="route-coverage-area" type="text" data-area-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Search regions">
+            <button id="route-coverage-generate" class="button button-ghost" type="button">Load every system</button>
+          </div>
+          <small id="route-coverage-status">Choose an area to generate an optimized coverage route.</small>
+        </div>
+        <label id="route-origin-field" class="field">
+          <span>Origin</span>
+          <input id="route-origin" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Amarr or 30002187">
+        </label>
+        <div class="field editor-wide system-builder">
+          <div class="builder-heading">
+            <span id="route-waypoint-heading">Stops <small>in travel order; the final stop is the endpoint</small></span>
+            <div class="builder-actions">
+              <button id="route-add-current-location" class="current-location-button" type="button"><span aria-hidden="true">◎</span> Add current location</button>
+            </div>
+          </div>
+          <div id="route-waypoint-list" class="ordered-system-list" aria-live="polite"></div>
+          <div id="route-waypoint-add-row" class="system-add-row">
+            <input id="route-waypoint-input" type="text" data-stop-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Search for a solar system or station">
+            <button id="route-waypoint-add" class="button button-ghost" type="button">Add stop</button>
+          </div>
+          <small>Choose a system or NPC station, or add the selected pilot’s exact live location. Drag the grip to reorder stops.</small>
+        </div>
+        <div class="field editor-wide system-builder">
+          <span>Systems to avoid <small>optional</small></span>
+          <div class="system-add-row">
+            <input id="route-avoid-input" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Search for a solar system">
+            <button id="route-avoid-add" class="button button-ghost" type="button">Avoid system</button>
+          </div>
+          <div id="route-avoid-list" class="system-chip-list" aria-live="polite"></div>
+        </div>
+        <div class="field editor-wide system-builder">
+          <span>Extra one-way connections <small>optional</small></span>
+          <div class="connection-add-row">
+            <input id="route-connection-from" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="From system">
+            <span aria-hidden="true">→</span>
+            <input id="route-connection-to" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="To system">
+            <button id="route-connection-add" class="button button-ghost" type="button">Add connection</button>
+          </div>
+          <div id="route-connection-list" class="connection-list" aria-live="polite"></div>
+          <small>Connections are directional. Add the reverse separately if travel works both ways.</small>
+        </div>
+        <fieldset class="editor-wide preference-fieldset">
+          <legend>Route preference</legend>
+          <label><input type="radio" name="preference" value="Shorter" checked><span><strong>Shortest</strong><small>Fewest stargate jumps</small></span></label>
+          <label><input type="radio" name="preference" value="Safer"><span><strong>Safer</strong><small>Favor high-security space</small></span></label>
+          <label><input type="radio" name="preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low-security space</small></span></label>
+        </fieldset>
+        <label id="security-penalty-field" class="field editor-wide range-field" hidden>
+          <span>Security strictness <output id="security-penalty-output">50</output></span>
+          <input id="security-penalty" type="range" min="0" max="100" value="50">
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select id="route-status">
+            <option value="ready">Ready</option>
+            <option value="draft">Draft</option>
+            <option value="archived">Archived</option>
+          </select>
+        </label>
+        <label class="field editor-wide">
+          <span>Flight notes <small>optional</small></span>
+          <textarea id="route-notes" rows="3" maxlength="800" placeholder="Doctrine, cargo, timing, or rendezvous details"></textarea>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button id="route-delete" class="button button-danger-ghost" type="button" hidden>Delete route</button>
+        <p id="route-form-status" class="modal-status" aria-live="polite"></p>
+        <button class="button button-ghost" type="button" data-close-dialog="route-editor">Cancel</button>
+        <button id="route-save" class="button button-primary" type="submit">Calculate &amp; save</button>
+      </div>
+    </form>
+    <div id="system-autocomplete-menu" class="system-autocomplete-menu" role="listbox" hidden></div>
+  </dialog>
+
+  <dialog id="route-detail" class="modal route-detail" aria-labelledby="detail-title">
+    <div class="modal-header">
+      <div><div id="detail-status" class="eyebrow">Ready route</div><h2 id="detail-title">Route</h2></div>
+      <button class="modal-close" type="button" data-close-dialog="route-detail" aria-label="Close">×</button>
+    </div>
+    <div id="route-detail-body" class="modal-body"></div>
+    <div class="modal-footer detail-actions">
+      <button id="detail-delete" class="button button-danger-ghost" type="button">Delete</button>
+      <span class="footer-spacer"></span>
+      <button id="detail-duplicate" class="button button-ghost" type="button">Duplicate</button>
+      <button id="detail-edit" class="button button-ghost" type="button">Edit</button>
+      <button id="detail-send" class="button button-primary" type="button">Send to autopilot</button>
+    </div>
+  </dialog>
+
+  <dialog id="route-assignment" class="modal route-assignment" aria-labelledby="route-assignment-title">
+    <form id="route-assignment-form" method="dialog">
+      <div class="modal-header">
+        <div><div class="eyebrow">Route staffing</div><h2 id="route-assignment-title">Assign pilots</h2></div>
+        <button class="modal-close" type="button" data-close-dialog="route-assignment" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="assignment-intro">Choose which online pilots receive this route. Offline pilots are shown for context but cannot be selected.</p>
+        <fieldset class="character-picker assignment-character-picker">
+          <legend class="sr-only">Route pilots</legend>
+          <div class="builder-heading assignment-character-heading">
+            <span>Route pilots</span>
+            <div class="coverage-assignment-actions">
+              <button id="assignment-select-all" type="button">Select all</button>
+              <button id="assignment-select-none" type="button">None</button>
+            </div>
+          </div>
+          <div id="route-assignment-character-options"></div>
+          <p id="route-assignment-character-empty" class="muted">Connect an EVE character before assigning this route.</p>
+        </fieldset>
+        <section id="route-assignment-coverage" class="assignment-coverage" hidden>
+          <div id="route-assignment-stops" class="assignment-stop-list"></div>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <p id="route-assignment-status" class="modal-status" aria-live="polite"></p>
+        <button class="button button-ghost" type="button" data-close-dialog="route-assignment">Cancel</button>
+        <button id="route-assignment-submit" class="button button-primary" type="submit" disabled>Set Routes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="clear-routes-dialog" class="modal clear-routes-dialog" aria-labelledby="clear-routes-title">
+    <form id="clear-routes-form" method="dialog">
+      <div class="modal-header">
+        <div><h2 id="clear-routes-title">Clear pilot routes</h2></div>
+        <button class="modal-close" type="button" data-close-dialog="clear-routes-dialog" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="assignment-intro">Choose online pilots whose EVE autopilot route should be cleared.</p>
+        <fieldset class="character-picker assignment-character-picker">
+          <legend class="sr-only">Pilots to clear</legend>
+          <div class="builder-heading assignment-character-heading">
+            <span>Pilots</span>
+            <div class="coverage-assignment-actions">
+              <button id="clear-routes-select-all" type="button">Select all</button>
+              <button id="clear-routes-select-none" type="button">None</button>
+            </div>
+          </div>
+          <div id="clear-routes-character-options"></div>
+          <p id="clear-routes-character-empty" class="muted">Connect an online pilot before clearing routes.</p>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <p id="clear-routes-status" class="modal-status" aria-live="polite"></p>
+        <button class="button button-ghost" type="button" data-close-dialog="clear-routes-dialog">Cancel</button>
+        <button id="clear-routes-submit" class="button button-primary" type="submit" disabled>Clear Route</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="modal confirm-dialog" aria-labelledby="confirm-title">
+    <div class="modal-header"><div><div class="eyebrow">Please confirm</div><h2 id="confirm-title">Are you sure?</h2></div></div>
+    <div class="modal-body"><p id="confirm-message"></p></div>
+    <div class="modal-footer">
+      <button id="confirm-cancel" class="button button-ghost" type="button">Cancel</button>
+      <button id="confirm-accept" class="button button-danger" type="button">Confirm</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

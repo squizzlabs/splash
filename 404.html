@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="robots" content="noindex"><title>Returning | Just The Trip</title></head>
+<body><script>
+  (function () {
+    var current = new URL(window.location.href);
+    if (current.pathname.replace(/\/$/, '').endsWith('/callback')) {
+      var auth = new URL('/auth.html', current.origin);
+      auth.search = current.search;
+      auth.hash = current.hash;
+      window.location.replace(auth.href);
+      return;
+    }
+    window.location.replace(new URL('/', current.origin).href);
+  })();
+</script></body>
+</html>
