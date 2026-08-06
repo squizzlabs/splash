@@ -232,7 +232,7 @@ export function nextRouteNavigationAction(route, character, progress) {
 }
 
 export function routeRequestBody(route) {
-  const preference = ROUTE_PREFERENCES.includes(route.preference) ? route.preference : 'Shorter';
+  const preference = ROUTE_PREFERENCES.includes(route.preference) ? route.preference : 'Safer';
   const penalty = Math.min(100, Math.max(0, Math.round(Number(route.securityPenalty ?? 50))));
   return {
     preference,
@@ -269,7 +269,7 @@ export function buildRoute(input, previous = null) {
 
   const now = new Date().toISOString();
   const status = ROUTE_STATUSES.includes(input.status) ? input.status : 'draft';
-  const preference = ROUTE_PREFERENCES.includes(input.preference) ? input.preference : 'Shorter';
+  const preference = ROUTE_PREFERENCES.includes(input.preference) ? input.preference : 'Safer';
   const assignedCharacterIds = [...new Set((input.assignedCharacterIds || [])
     .map(Number)
     .filter((id) => Number.isSafeInteger(id) && id > 0))];
@@ -410,5 +410,5 @@ export function parseRouteImport(payload, existingRoutes = [], availableCharacte
 }
 
 export function preferenceLabel(preference) {
-  return ({ Shorter: 'Shortest', Safer: 'Safer', LessSecure: 'Less secure' })[preference] || 'Shortest';
+  return ({ Shorter: 'Shortest', Safer: 'Safest', LessSecure: 'Less secure' })[preference] || 'Safest';
 }

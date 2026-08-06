@@ -150,6 +150,37 @@
             <div><dt>Systems</dt><dd id="settings-system-count">—</dd></div>
           </dl>
         </section>
+        <section class="settings-card settings-card-wide settings-routing-card">
+          <div class="settings-card-heading">
+            <span class="settings-glyph">A*</span>
+            <div><h2>Routing</h2><p>Defaults used whenever a route is calculated.</p></div>
+          </div>
+          <div class="settings-routing-grid">
+            <fieldset class="preference-fieldset settings-preference-fieldset">
+              <legend>Route preference</legend>
+              <label><input type="radio" name="settings-route-preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
+              <label><input type="radio" name="settings-route-preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high security</small></span></label>
+              <label><input type="radio" name="settings-route-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
+            </fieldset>
+            <div class="settings-routing-secondary">
+              <label id="settings-security-penalty-field" class="field range-field">
+                <span>Security strictness <output id="settings-security-penalty-output">50</output></span>
+                <input id="settings-security-penalty" type="range" min="0" max="100" value="50">
+              </label>
+              <fieldset class="settings-shortcut-options">
+                <legend>Wormhole shortcuts</legend>
+                <label class="settings-check-option">
+                  <input id="settings-always-thera" type="checkbox">
+                  <span><strong>Always use Thera</strong><small>Selected by default in route planners</small></span>
+                </label>
+                <label class="settings-check-option">
+                  <input id="settings-always-turnur" type="checkbox">
+                  <span><strong>Always use Turnur</strong><small>Selected by default in route planners</small></span>
+                </label>
+              </fieldset>
+            </div>
+          </div>
+        </section>
         <section class="settings-card settings-card-wide">
           <div class="settings-card-heading">
             <span class="settings-glyph">I/O</span>
@@ -277,11 +308,11 @@
         </div>
         <fieldset class="editor-wide preference-fieldset">
           <legend>Route preference</legend>
-          <label><input type="radio" name="preference" value="Shorter" checked><span><strong>Shortest</strong><small>Fewest stargate jumps</small></span></label>
-          <label><input type="radio" name="preference" value="Safer"><span><strong>Safer</strong><small>Favor high-security space</small></span></label>
+          <label><input type="radio" name="preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest stargate jumps</small></span></label>
+          <label><input type="radio" name="preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high-security space</small></span></label>
           <label><input type="radio" name="preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low-security space</small></span></label>
         </fieldset>
-        <label id="security-penalty-field" class="field editor-wide range-field" hidden>
+        <label id="security-penalty-field" class="field editor-wide range-field">
           <span>Security strictness <output id="security-penalty-output">50</output></span>
           <input id="security-penalty" type="range" min="0" max="100" value="50">
         </label>
@@ -345,6 +376,16 @@
           </div>
           <small id="assignment-wormhole-status" class="wormhole-status" aria-live="polite">Off. This assignment uses stargates and custom connections only.</small>
         </fieldset>
+        <fieldset class="preference-fieldset assignment-preference-fieldset">
+          <legend>Route preference</legend>
+          <label><input type="radio" name="assignment-preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
+          <label><input type="radio" name="assignment-preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high security</small></span></label>
+          <label><input type="radio" name="assignment-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
+        </fieldset>
+        <label id="assignment-security-penalty-field" class="field range-field">
+          <span>Security strictness <output id="assignment-security-penalty-output">50</output></span>
+          <input id="assignment-security-penalty" type="range" min="0" max="100" value="50">
+        </label>
         <fieldset class="character-picker assignment-character-picker">
           <legend class="sr-only">Route pilots</legend>
           <div class="builder-heading assignment-character-heading">
@@ -397,11 +438,11 @@
 
           <fieldset class="preference-fieldset ad-hoc-preference-fieldset">
             <legend>Route preference</legend>
-            <label><input type="radio" name="ad-hoc-preference" value="Shorter" checked><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
-            <label><input type="radio" name="ad-hoc-preference" value="Safer"><span><strong>Safer</strong><small>Favor high security</small></span></label>
+            <label><input type="radio" name="ad-hoc-preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
+            <label><input type="radio" name="ad-hoc-preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high security</small></span></label>
             <label><input type="radio" name="ad-hoc-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
           </fieldset>
-          <label id="ad-hoc-security-penalty-field" class="field range-field" hidden>
+          <label id="ad-hoc-security-penalty-field" class="field range-field">
             <span>Security strictness <output id="ad-hoc-security-penalty-output">50</output></span>
             <input id="ad-hoc-security-penalty" type="range" min="0" max="100" value="50">
           </label>

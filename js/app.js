@@ -33,7 +33,14 @@ const state = {
   systemSearch: [],
   routes: [],
   characters: [],
-  settings: { theme: 'system', density: 'comfortable' },
+  settings: {
+    theme: 'system',
+    density: 'comfortable',
+    routePreference: 'Safer',
+    securityPenalty: 50,
+    alwaysUseThera: false,
+    alwaysUseTurnur: false
+  },
   editingRouteId: null,
   editorStops: [],
   editorAvoidSystems: [],
@@ -167,6 +174,24 @@ function jumpLabel(route) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   return min === max ? String(min) : `${min}–${max}`;
+}
+
+function routingPreference() {
+  return ['Shorter', 'Safer', 'LessSecure'].includes(state.settings.routePreference)
+    ? state.settings.routePreference
+    : 'Safer';
+}
+
+function routingSecurityPenalty() {
+  const value = Number(state.settings.securityPenalty);
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 50;
+}
+
+function alwaysWormholeHubs() {
+  return normalizeWormholeHubs([
+    state.settings.alwaysUseThera ? 'thera' : null,
+    state.settings.alwaysUseTurnur ? 'turnur' : null
+  ]);
 }
 
 function selectedEditorWormholeHubs() {
@@ -743,6 +768,14 @@ function renderCharacters() {
 function renderSettings() {
   $('theme-select').value = state.settings.theme;
   $('density-select').value = state.settings.density;
+  const preference = routingPreference();
+  const preferenceInput = document.querySelector(`input[name="settings-route-preference"][value="${preference}"]`);
+  if (preferenceInput) preferenceInput.checked = true;
+  $('settings-security-penalty').value = routingSecurityPenalty();
+  $('settings-security-penalty-output').textContent = routingSecurityPenalty();
+  $('settings-security-penalty-field').hidden = preference === 'Shorter';
+  $('settings-always-thera').checked = state.settings.alwaysUseThera === true;
+  $('settings-always-turnur').checked = state.settings.alwaysUseTurnur === true;
   if (state.graph) {
     $('settings-sde-build').textContent = state.graph.version || 'Unknown';
     $('settings-sde-date').textContent = formatDate(state.graph.releaseDate);
@@ -1129,7 +1162,7 @@ async function generateCoverageStops() {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const origin = coverageReferenceOrigin();
     const options = {
-      preference: document.querySelector('input[name="preference"]:checked')?.value || 'Shorter',
+      preference: document.querySelector('input[name="preference"]:checked')?.value || routingPreference(),
       securityPenalty: $('security-penalty').value,
       avoidSystems: state.editorAvoidSystems,
       connections: state.editorConnections,
@@ -1156,7 +1189,7 @@ async function generateCoverageStops() {
 }
 
 function updatePreference() {
-  const preference = document.querySelector('input[name="preference"]:checked')?.value || 'Shorter';
+  const preference = document.querySelector('input[name="preference"]:checked')?.value || routingPreference();
   $('security-penalty-field').hidden = preference === 'Shorter';
 }
 
@@ -1357,18 +1390,20 @@ function openRouteEditor(route = null) {
   state.editorStops = (route?.stops || []).map((stop) => ({ ...stop }));
   state.editorAvoidSystems = (route?.avoidSystems || []).map((system) => ({ ...system }));
   state.editorConnections = (route?.connections || []).map((connection) => ({ from: { ...connection.from }, to: { ...connection.to } }));
-  const wormholeHubs = new Set(normalizeWormholeHubs(route?.wormholeHubs));
+  const wormholeHubs = new Set(route ? normalizeWormholeHubs(route.wormholeHubs) : alwaysWormholeHubs());
   $('route-wormhole-thera').checked = wormholeHubs.has('thera');
   $('route-wormhole-turnur').checked = wormholeHubs.has('turnur');
+  $('route-wormhole-thera').disabled = false;
+  $('route-wormhole-turnur').disabled = false;
   $('route-waypoint-input').value = '';
   $('route-avoid-input').value = '';
   $('route-connection-from').value = '';
   $('route-connection-to').value = '';
   $('route-status').value = route?.status || 'ready';
   $('route-notes').value = route?.notes || '';
-  $('security-penalty').value = route?.securityPenalty ?? 50;
+  $('security-penalty').value = route?.securityPenalty ?? routingSecurityPenalty();
   $('security-penalty-output').textContent = $('security-penalty').value;
-  const preference = route?.preference || 'Shorter';
+  const preference = route?.preference || routingPreference();
   document.querySelector(`input[name="preference"][value="${preference}"]`).checked = true;
   updateOriginMode();
   updateRouteMode();
@@ -1510,7 +1545,7 @@ async function saveRoute(event) {
       wormholeHubs,
       assignedCharacterIds,
       stopAssignments: [],
-      preference: document.querySelector('input[name="preference"]:checked').value,
+      preference: document.querySelector('input[name="preference"]:checked')?.value || routingPreference(),
       securityPenalty: $('security-penalty').value,
       status: $('route-status').value,
       notes: $('route-notes').value,
@@ -1606,14 +1641,15 @@ function openRouteDetail(route) {
     : `${route.stops?.length || 0} ordered stop${route.stops?.length === 1 ? '' : 's'}`;
   const endpointLabel = coverage ? (route.coverageArea?.type || 'Coverage') : 'Final stop';
   const endpointName = coverage ? route.coverageArea?.name || 'Unknown area' : route.stops?.at(-1)?.name || 'No stops';
-  const penalty = route.preference === 'Shorter' ? '' : ` · strictness ${route.securityPenalty}`;
+  const preference = route.preference;
+  const penalty = preference === 'Shorter' ? '' : ` · strictness ${route.securityPenalty}`;
   $('route-detail-body').innerHTML = `
     <div class="detail-hero">
       <div class="detail-endpoint"><span>Origin</span><strong>${escapeHtml(originLabel)}</strong></div>
       <div class="detail-jumps"><strong>${jumpLabel(route)}</strong><span>calculated jumps</span></div>
       <div class="detail-endpoint"><span>${escapeHtml(endpointLabel)}</span><strong>${escapeHtml(endpointName)}</strong></div>
     </div>
-    <div class="detail-meta"><span>${escapeHtml(preferenceLabel(route.preference) + penalty)}</span><span>${escapeHtml(via)}</span><span>A* · SDE ${escapeHtml(state.graph.version)}</span><span>Updated ${escapeHtml(formatRelative(route.updatedAt))}</span></div>
+    <div class="detail-meta"><span>${escapeHtml(preferenceLabel(preference) + penalty)}</span><span>${escapeHtml(via)}</span><span>A* · SDE ${escapeHtml(state.graph.version)}</span><span>Updated ${escapeHtml(formatRelative(route.updatedAt))}</span></div>
     ${route.notes ? `<p class="detail-notes">${escapeHtml(route.notes)}</p>` : ''}
     ${(route.calculations || []).map((calculation) => detailCalculationMarkup(route, calculation)).join('')}
     <div class="assigned-crew">${crew.length ? crew.map((character) => `<span class="crew-chip ${isCharacterOnline(character) ? '' : 'is-offline'}"><img src="${portraitUrl(character.id, 64)}" alt=""><span>${escapeHtml(character.name)}<small>${escapeHtml(isCharacterOnline(character) ? character.ship?.typeName || 'Ship unknown' : 'Offline')}</small></span></span>`).join('') : '<span class="muted">No characters assigned.</span>'}</div>`;
@@ -1636,6 +1672,11 @@ function currentAssignmentRoute() {
   return state.routes.find((route) => route.id === state.assigningRouteId) || null;
 }
 
+function updateAssignmentPreference() {
+  const preference = document.querySelector('input[name="assignment-preference"]:checked')?.value || routingPreference();
+  $('assignment-security-penalty-field').hidden = preference === 'Shorter';
+}
+
 function renderRouteAssignment() {
   const route = currentAssignmentRoute();
   if (!route) return;
@@ -1646,6 +1687,9 @@ function renderRouteAssignment() {
   $('assignment-wormhole-turnur').checked = state.assignmentWormholeHubs.has('turnur');
   $('assignment-wormhole-thera').disabled = state.settingRoutes;
   $('assignment-wormhole-turnur').disabled = state.settingRoutes;
+  document.querySelectorAll('input[name="assignment-preference"]').forEach((input) => { input.disabled = state.settingRoutes; });
+  $('assignment-security-penalty').disabled = state.settingRoutes;
+  updateAssignmentPreference();
   renderWormholeStatuses();
   $('route-assignment-title').textContent = `Assign pilots · ${route.name}`;
   $('route-assignment-character-options').innerHTML = state.characters.map((character) => {
@@ -1691,6 +1735,10 @@ function openRouteAssignment(route) {
   state.assignmentCharacterIds = soleOnlineCharacterSelection();
   state.assignmentWormholeHubs = new Set(normalizeWormholeHubs(route.wormholeHubs));
   state.settingRoutes = false;
+  const preference = route.preference || routingPreference();
+  document.querySelector(`input[name="assignment-preference"][value="${preference}"]`).checked = true;
+  $('assignment-security-penalty').value = route.securityPenalty ?? routingSecurityPenalty();
+  $('assignment-security-penalty-output').textContent = $('assignment-security-penalty').value;
   $('route-assignment-status').textContent = '';
   $('route-assignment-status').classList.remove('is-error');
   renderRouteAssignment();
@@ -1713,7 +1761,7 @@ function setAdHocStatus(message = '', isError = false) {
 }
 
 function updateAdHocPreference() {
-  const preference = document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || 'Shorter';
+  const preference = document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || routingPreference();
   $('ad-hoc-security-penalty-field').hidden = preference === 'Shorter';
 }
 
@@ -1724,6 +1772,8 @@ function renderAdHocRouteDialog() {
   $('ad-hoc-controls').disabled = state.settingAdHocRoute;
   $('ad-hoc-wormhole-thera').checked = state.adHocWormholeHubs.has('thera');
   $('ad-hoc-wormhole-turnur').checked = state.adHocWormholeHubs.has('turnur');
+  $('ad-hoc-wormhole-thera').disabled = state.settingAdHocRoute;
+  $('ad-hoc-wormhole-turnur').disabled = state.settingAdHocRoute;
   $('ad-hoc-character-options').innerHTML = state.characters.map((character) => {
     const online = isCharacterOnline(character);
     const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
@@ -1763,9 +1813,12 @@ function openAdHocRouteDialog() {
   state.adHocCharacterIds = soleOnlineCharacterSelection();
   state.adHocAvoidSystems = [];
   state.adHocConnections = [];
-  state.adHocWormholeHubs = new Set();
+  state.adHocWormholeHubs = new Set(alwaysWormholeHubs());
   state.settingAdHocRoute = false;
-  $('ad-hoc-security-penalty-output').textContent = '50';
+  const preference = routingPreference();
+  document.querySelector(`input[name="ad-hoc-preference"][value="${preference}"]`).checked = true;
+  $('ad-hoc-security-penalty').value = routingSecurityPenalty();
+  $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value;
   setAdHocStatus();
   renderAdHocRouteDialog();
   if (!$('ad-hoc-route-dialog').open) $('ad-hoc-route-dialog').showModal();
@@ -1965,7 +2018,7 @@ async function setAdHocRoute() {
     connections: state.adHocConnections,
     wormholeHubs: selectedAdHocWormholeHubs(),
     assignedCharacterIds: selected.map((character) => character.id),
-    preference: document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || 'Shorter',
+    preference: document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || routingPreference(),
     securityPenalty: $('ad-hoc-security-penalty').value,
     status: 'ready',
     notes: '',
@@ -2071,6 +2124,8 @@ async function saveRouteAssignments(event) {
   const seed = {
     ...route,
     wormholeHubs: selectedAssignmentWormholeHubs(),
+    preference: document.querySelector('input[name="assignment-preference"]:checked')?.value || route.preference || routingPreference(),
+    securityPenalty: $('assignment-security-penalty').value,
     assignedCharacterIds: selected.map((character) => character.id),
     stopAssignments: [],
     calculations: []
@@ -2424,6 +2479,8 @@ function bindEvents() {
       if (state.assignmentWormholeHubs.size) refreshWormholeConnections().catch(() => {});
     });
   });
+  document.querySelectorAll('input[name="assignment-preference"]').forEach((input) => input.addEventListener('change', updateAssignmentPreference));
+  $('assignment-security-penalty').addEventListener('input', () => { $('assignment-security-penalty-output').textContent = $('assignment-security-penalty').value; });
   ['ad-hoc-wormhole-thera', 'ad-hoc-wormhole-turnur'].forEach((id) => {
     $(id).addEventListener('change', () => {
       state.adHocWormholeHubs = new Set(normalizeWormholeHubs([
@@ -2716,6 +2773,38 @@ function bindEvents() {
   $('density-select').addEventListener('change', async () => {
     try { await updateSetting('density', $('density-select').value); } catch (error) { toast(error.message, 'error'); }
   });
+  document.querySelectorAll('input[name="settings-route-preference"]').forEach((input) => input.addEventListener('change', async () => {
+    try {
+      await updateSetting('routePreference', input.value);
+      renderSettings();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }));
+  $('settings-security-penalty').addEventListener('input', () => {
+    state.settings = { ...state.settings, securityPenalty: Number($('settings-security-penalty').value) };
+    $('settings-security-penalty-output').textContent = $('settings-security-penalty').value;
+  });
+  $('settings-security-penalty').addEventListener('change', async () => {
+    try {
+      await store.setSetting('securityPenalty', routingSecurityPenalty());
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+  [
+    ['settings-always-thera', 'alwaysUseThera'],
+    ['settings-always-turnur', 'alwaysUseTurnur']
+  ].forEach(([id, key]) => $(id).addEventListener('change', async () => {
+    try {
+      await updateSetting(key, $(id).checked);
+      renderSettings();
+      renderWormholeStatuses();
+      if ($(id).checked) refreshWormholeConnections().catch(() => {});
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }));
   $('erase-data').addEventListener('click', eraseAllData);
   window.addEventListener('storage', async () => {
     state.routes = await store.getAll('routes');
@@ -2727,12 +2816,30 @@ function bindEvents() {
 async function initialize() {
   updateSlogan();
   try {
-    const [graph, routes, characters, theme, density, routeSearch, routeStatus, routeSort, showOfflinePilots] = await Promise.all([
+    const [
+      graph,
+      routes,
+      characters,
+      theme,
+      density,
+      routePreference,
+      securityPenalty,
+      alwaysUseThera,
+      alwaysUseTurnur,
+      routeSearch,
+      routeStatus,
+      routeSort,
+      showOfflinePilots
+    ] = await Promise.all([
       UniverseGraph.load('./data/universe.json'),
       store.getAll('routes'),
       store.getAll('characters'),
       store.getSetting('theme', 'system'),
       store.getSetting('density', 'comfortable'),
+      store.getSetting('routePreference', 'Safer'),
+      store.getSetting('securityPenalty', 50),
+      store.getSetting('alwaysUseThera', false),
+      store.getSetting('alwaysUseTurnur', false),
       store.getSetting('route-search', ''),
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
@@ -2741,7 +2848,14 @@ async function initialize() {
     state.graph = graph;
     state.routes = routes;
     state.characters = characters.sort((a, b) => a.name.localeCompare(b.name));
-    state.settings = { theme, density };
+    state.settings = {
+      theme,
+      density,
+      routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
+      securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
+      alwaysUseThera: alwaysUseThera === true,
+      alwaysUseTurnur: alwaysUseTurnur === true
+    };
     $('route-search').value = typeof routeSearch === 'string' ? routeSearch : '';
     $('route-status-filter').value = ['all', 'ready', 'draft', 'archived'].includes(routeStatus) ? routeStatus : 'all';
     $('route-sort').value = ['updated', 'name', 'jumps'].includes(routeSort) ? routeSort : 'updated';
@@ -2750,7 +2864,8 @@ async function initialize() {
     prepareSystemAutocomplete();
     bindEvents();
     renderAll();
-    const hasWormholeRoute = state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)
+    const hasWormholeRoute = alwaysWormholeHubs().length
+      || state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)
       || state.characters.some((character) => normalizeWormholeHubs(character.directRoute?.wormholeHubs).length);
     if (hasWormholeRoute) {
       try {

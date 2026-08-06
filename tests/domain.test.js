@@ -92,6 +92,11 @@ test('route request matches the current ESI/SDE routing options', () => {
   });
 });
 
+test('routing defaults to safest when no preference is supplied', () => {
+  assert.equal(routeRequestBody({}).preference, 'Safer');
+  assert.equal(buildRoute({ origin: systems.a, stops: [systems.c] }).preference, 'Safer');
+});
+
 test('multi-leg paths merge without repeated boundaries', () => {
   assert.deepEqual(mergeCalculatedLegs([[1, 2, 3], [3, 4], [4, 5]]), [1, 2, 3, 4, 5]);
 });

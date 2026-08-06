@@ -410,6 +410,18 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .settings-glyph { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 7px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); font-size: 9px; font-weight: 900; letter-spacing: .05em; }
 .settings-card-heading h2 { margin: 0 0 2px; font-size: 17px; }
 .settings-card-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.settings-routing-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr); align-items: start; gap: 18px; }
+.settings-preference-fieldset { margin: 0; }
+.settings-preference-fieldset label > span { padding: 10px; }
+.settings-routing-secondary { display: grid; gap: 13px; }
+.settings-routing-secondary > .field { margin: 0; }
+.settings-shortcut-options { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.settings-shortcut-options legend { grid-column: 1 / -1; margin-bottom: 1px; }
+.settings-check-option { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: var(--control-radius); cursor: pointer; }
+.settings-check-option input { flex: 0 0 auto; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.settings-check-option span { display: grid; min-width: 0; }
+.settings-check-option strong { font-size: 10px; }
+.settings-check-option small { color: var(--muted); font-size: 8px; }
 .field { display: grid; gap: 7px; margin-top: 16px; }
 .field > span, fieldset > legend { color: var(--muted-strong); font-size: 11px; font-weight: 750; }
 .field > span small { color: var(--muted); font-weight: 500; }
@@ -432,6 +444,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .wormhole-option small, .wormhole-status { color: var(--muted); font-size: 9px; }
 .wormhole-option input:checked + span { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px var(--blue); }
 .wormhole-option input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 2px; }
+.wormhole-option input:disabled + span { cursor: default; }
 .wormhole-status { display: block; margin-top: 6px; }
 .wormhole-status.is-error { color: var(--danger); }
 .current-location-button { min-height: var(--compact-control-height); padding: 0 9px; color: var(--blue); background: var(--blue-soft); border: 1px solid color-mix(in srgb, var(--blue) 25%, transparent); border-radius: 6px; font-size: 9px; font-weight: 750; }
@@ -566,6 +579,8 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .clear-routes-dialog .modal-footer { flex-wrap: wrap; }
 .assignment-intro { margin: 0 0 20px; color: var(--muted); font-size: 11px; }
 .assignment-wormholes { margin: 0 0 18px; }
+.assignment-preference-fieldset { margin: 0 0 12px; }
+#assignment-security-penalty-field { margin: 0 0 18px; }
 .assignment-character-picker { margin-top: 0; }
 .assignment-character-heading { margin-bottom: 8px; }
 .assignment-coverage { display: grid; gap: 10px; margin-top: 18px; }
@@ -671,6 +686,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
   .utility-heading .page-heading-actions { margin-top: 0; }
   .settings-grid { grid-template-columns: 1fr; }
   .settings-card-wide { grid-column: 1; }
+  .settings-routing-grid, .settings-shortcut-options { grid-template-columns: 1fr; }
   .data-actions .button { width: 100%; }
   .editor-grid { grid-template-columns: 1fr; }
   .editor-wide, .editor-name { grid-column: 1; }
