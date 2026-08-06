@@ -134,12 +134,10 @@ h1, h2, h3, p { margin-top: 0; }
 }
 
 .brand { display: inline-flex; align-items: center; gap: 11px; width: fit-content; text-decoration: none; }
-.brand-mark { width: 40px; height: 40px; fill: none; stroke: var(--accent); stroke-width: 1.7; }
-.brand-mark path { fill: var(--accent); stroke: none; }
-.brand-mark circle:last-child { fill: var(--bg); }
+.brand-mark { display: block; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 .brand-type { display: grid; line-height: .95; letter-spacing: .02em; }
 .brand-type strong { font-size: 10px; letter-spacing: .18em; color: var(--muted-strong); }
-.brand-type span { font-size: 22px; font-weight: 850; letter-spacing: -.04em; }
+.brand-type span { color: var(--accent); font-size: 22px; font-weight: 850; letter-spacing: -.04em; }
 .brand-slogan { display: grid; align-content: center; flex: 0 0 144px; width: 144px; gap: 1px; margin: 0; color: var(--muted-strong); font-size: 11px; line-height: 1.18; white-space: nowrap; }
 .brand-slogan strong { display: block; color: var(--accent); }
 
