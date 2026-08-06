@@ -174,6 +174,10 @@
                   <span><strong>Always use Turnur</strong><small>Selected by default in route planners</small></span>
                 </label>
               </fieldset>
+              <label class="settings-check-option settings-override-option">
+                <input id="settings-override-game-routing" type="checkbox">
+                <span><strong>Override Game Routing</strong><small>Add every calculated system as an ESI waypoint by default</small></span>
+              </label>
             </div>
           </div>
         </section>
@@ -312,6 +316,10 @@
           <span>Security strictness <output id="security-penalty-output">50</output></span>
           <input id="security-penalty" type="range" min="0" max="100" value="50">
         </label>
+        <label class="routing-override-option editor-wide">
+          <input id="route-override-game-routing" type="checkbox">
+          <span><strong>Override Game Routing</strong><small>Add every calculated system to the in-game route</small></span>
+        </label>
         <label class="field">
           <span>Status</span>
           <select id="route-status">
@@ -382,6 +390,10 @@
           <span>Security strictness <output id="assignment-security-penalty-output">50</output></span>
           <input id="assignment-security-penalty" type="range" min="0" max="100" value="50">
         </label>
+        <label class="routing-override-option assignment-override-option">
+          <input id="assignment-override-game-routing" type="checkbox">
+          <span><strong>Override Game Routing</strong><small>Add every calculated system to each pilot’s in-game route</small></span>
+        </label>
         <fieldset class="character-picker assignment-character-picker">
           <legend class="sr-only">Route pilots</legend>
           <div class="builder-heading assignment-character-heading">
@@ -441,6 +453,10 @@
           <label id="ad-hoc-security-penalty-field" class="field range-field">
             <span>Security strictness <output id="ad-hoc-security-penalty-output">50</output></span>
             <input id="ad-hoc-security-penalty" type="range" min="0" max="100" value="50">
+          </label>
+          <label class="routing-override-option ad-hoc-override-option">
+            <input id="ad-hoc-override-game-routing" type="checkbox">
+            <span><strong>Override Game Routing</strong><small>Add every calculated system to the in-game route</small></span>
           </label>
 
           <fieldset class="wormhole-fieldset ad-hoc-wormholes">

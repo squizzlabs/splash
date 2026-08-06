@@ -97,3 +97,22 @@ test('setting the current location as a waypoint clears existing waypoints', asy
   assert.equal(requestOptions.method, 'POST');
   assert.equal(requestOptions.characterId, 42);
 });
+
+test('setting an exact route clears once and appends every waypoint in order', async () => {
+  const client = new ESIClient({
+    get: async () => null,
+    put: async () => undefined
+  });
+  const requests = [];
+  client.request = async (path, options) => {
+    requests.push({ path, options });
+    return { data: null };
+  };
+
+  await client.setWaypoints(42, [30000142, 30000144, 60003760], true);
+
+  const queries = requests.map(({ path }) => new URL(path, 'https://esi.evetech.net').searchParams);
+  assert.deepEqual(queries.map((query) => query.get('destination_id')), ['30000142', '30000144', '60003760']);
+  assert.deepEqual(queries.map((query) => query.get('clear_other_waypoints')), ['true', 'false', 'false']);
+  assert.ok(requests.every(({ options }) => options.method === 'POST' && options.characterId === 42));
+});

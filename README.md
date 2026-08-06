@@ -16,7 +16,8 @@ Just The Trip is a static, browser-only EVE Online route planner. It keeps route
 - Optionally include completed, unexpired public Thera and Turnur wormhole connections in A* route calculations, with persistent always-use defaults.
 - Create and edit routes without assigning characters, then staff each route from its flight-board action.
 - Assign one saved route to multiple characters; every selected pilot receives the complete route.
-- Stage one reachable ESI waypoint at a time for every assigned character and advance it from live location updates.
+- Stage reachable ESI waypoints for every assigned character and advance wormhole-separated segments from live location updates.
+- Optionally override EVE's route choice by submitting every calculated system as an ordered waypoint, with an off-by-default setting and per-route controls.
 - Create, inspect, update, duplicate, archive, and delete routes.
 - Avoid systems and add custom one-way connections such as jump bridges.
 - Import and export portable route JSON without exposing character tokens.
@@ -93,9 +94,9 @@ node scripts/build-sde.mjs \
 
 Thera, Turnur, or both can be selected while editing a route, creating a direct route, or immediately before assigning it to pilots. Settings supply the initial selections, and each route operation can override them. Just The Trip reads completed, unexpired public connections from the [EVE-Scout API](https://api.eve-scout.com/ui/) and caches the result in memory for five minutes. The most recently assigned choice is saved on the route and persists with route exports; live signatures do not.
 
-The default route preference is stored in Settings and defaults to Safest when it has never been set. Route creation, direct routes, and assignment retain their own Shortest, Safest, and Less secure controls, initialized from that default or the saved route.
+The default route preference is stored in Settings and defaults to Safest when it has never been set. Route creation, direct routes, and assignment retain their own Shortest, Safest, and Less secure controls, initialized from that default or the saved route. **Override Game Routing** is also a setting-backed, per-operation option and defaults to off. When enabled, Just The Trip clears the pilot's existing in-game route and appends every calculated solar system in order, including a station or structure stop after its system, so EVE follows the app's exact gate path.
 
-EVE autopilot cannot perform a wormhole traversal. Just The Trip therefore stages route delivery: it sends only the next gate-reachable waypoint, waits for location polling to confirm the pilot reached it, and then adds the next one. At a wormhole system, Route Progress shows the exact signature to warp to and tracks the pilot through the destination system without submitting Thera or another wormhole-only system to ESI. Wormhole instructions, signatures, and expiration times are retained with the calculated pilot route. The planner currently does not filter connections by the active ship's mass limit.
+EVE autopilot cannot perform a wormhole traversal. Just The Trip therefore stages route delivery at wormhole boundaries: it sends the current gate-reachable segment, waits for location polling to confirm the pilot crossed the hole, and then sends the next segment. Without game-routing override, each segment contains only its next planned stop. At a wormhole system, Route Progress shows the exact signature to warp to and tracks the pilot through the destination system without submitting Thera or another wormhole-only system to ESI. Wormhole instructions, signatures, and expiration times are retained with the calculated pilot route. The planner currently does not filter connections by the active ship's mass limit.
 
 ## Privacy and backups
 

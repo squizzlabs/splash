@@ -13,6 +13,7 @@ import {
   parseList,
   parseRouteImport,
   nextRouteNavigationAction,
+  overrideGameWaypoints,
   remainingRouteWormholes,
   routeRequestBody,
   routeNavigationStages,
@@ -94,7 +95,10 @@ test('route request matches the current ESI/SDE routing options', () => {
 
 test('routing defaults to safest when no preference is supplied', () => {
   assert.equal(routeRequestBody({}).preference, 'Safer');
-  assert.equal(buildRoute({ origin: systems.a, stops: [systems.c] }).preference, 'Safer');
+  const route = buildRoute({ origin: systems.a, stops: [systems.c] });
+  assert.equal(route.preference, 'Safer');
+  assert.equal(route.overrideGameRouting, false);
+  assert.equal(buildRoute({ origin: systems.a, stops: [systems.c], overrideGameRouting: true }).overrideGameRouting, true);
 });
 
 test('multi-leg paths merge without repeated boundaries', () => {
@@ -121,6 +125,7 @@ test('route exports retain wormhole hubs and import assignments only for charact
     origin: systems.a,
     stops: [systems.c],
     wormholeHubs: ['thera', 'turnur'],
+    overrideGameRouting: true,
     assignedCharacterIds: [9001, 9002]
   });
   assert.equal('destination' in route, false);
@@ -129,6 +134,7 @@ test('route exports retain wormhole hubs and import assignments only for charact
   const [imported] = parseRouteImport(payload, [], [9002]);
   assert.deepEqual(imported.assignedCharacterIds, [9002]);
   assert.deepEqual(imported.wormholeHubs, ['thera', 'turnur']);
+  assert.equal(imported.overrideGameRouting, true);
 });
 
 test('duplicated routes start unassigned', () => {
@@ -205,6 +211,32 @@ test('station stops route through their solar system and retain their ESI destin
   assert.equal(route.stops.at(-1).kind, 'station');
 });
 
+test('game routing override submits every calculated system and retains station stops in order', () => {
+  const station = {
+    id: 60000001,
+    name: 'Delta I - Test Station',
+    kind: 'station',
+    systemId: systems.d.id,
+    systemName: systems.d.name
+  };
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.b, station],
+    overrideGameRouting: true,
+    assignedCharacterIds: [9001],
+    calculations: [{
+      key: '9001',
+      characterId: 9001,
+      origin: systems.a,
+      systems: [systems.a, systems.b, systems.c, systems.d]
+    }]
+  });
+
+  const waypoints = overrideGameWaypoints(route, 9001, { systemIndex: 0 });
+  assert.deepEqual(waypoints.map((waypoint) => waypoint.id), [2, 3, 4, 60000001]);
+  assert.deepEqual(waypoints.map((waypoint) => waypoint.systemIndex), [1, 2, 3, 3]);
+});
+
 test('wormhole navigation stages approach the hole, show its signature, and never waypoint Thera', () => {
   const thera = { id: 31000005, name: 'Thera' };
   const route = buildRoute({
@@ -257,6 +289,9 @@ test('wormhole navigation stages approach the hole, show its signature, and neve
   assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 0 }).map((step) => step.signatureId), ['INB-123', 'OUT-789']);
   assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 2 }).map((step) => step.signatureId), ['OUT-789']);
   assert.deepEqual(remainingRouteWormholes(route, character.id, { systemIndex: 3 }), []);
+  assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 0 }).map((waypoint) => waypoint.id), [systems.b.id]);
+  assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 1 }), []);
+  assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 2 }), []);
 
   const approach = nextRouteNavigationAction(route, character, { systemIndex: 0, onRoute: true });
   assert.equal(approach.kind, 'waypoint');

@@ -191,6 +191,36 @@ export function routeNavigationStages(route, characterId = null) {
   });
 }
 
+export function overrideGameWaypoints(route, characterId = null, progress = null) {
+  const calculation = routeCalculationFor(route, characterId);
+  if (!calculation?.systems?.length) return [];
+  const currentIndex = Number.isInteger(progress?.systemIndex) ? progress.systemIndex : -1;
+  const startIndex = Math.max(0, currentIndex + 1);
+  const nextWormhole = [...(calculation.wormholeSteps || [])]
+    .filter((step) => Number(step.toIndex) > currentIndex && Number(step.fromIndex) >= currentIndex)
+    .sort((left, right) => Number(left.fromIndex) - Number(right.fromIndex))[0] || null;
+  const endIndex = nextWormhole ? Number(nextWormhole.fromIndex) : calculation.systems.length - 1;
+  if (startIndex > endIndex) return [];
+
+  const specifiedStops = route.mode === 'coverage' ? calculation.stops || route.stops || [] : route.stops || [];
+  const stopsByIndex = new Map();
+  routeStopSystemIndexes(calculation.systems, specifiedStops).forEach((systemIndex, stopIndex) => {
+    if (!Number.isInteger(systemIndex) || systemIndex < 0) return;
+    if (!stopsByIndex.has(systemIndex)) stopsByIndex.set(systemIndex, []);
+    stopsByIndex.get(systemIndex).push(specifiedStops[stopIndex]);
+  });
+
+  const waypoints = [];
+  for (let systemIndex = startIndex; systemIndex <= endIndex; systemIndex += 1) {
+    const system = calculation.systems[systemIndex];
+    waypoints.push({ ...system, kind: 'system', systemIndex });
+    (stopsByIndex.get(systemIndex) || []).forEach((stop) => {
+      if (stop.kind === 'station' || stop.kind === 'structure') waypoints.push({ ...stop, systemIndex });
+    });
+  }
+  return waypoints;
+}
+
 export function remainingRouteWormholes(route, characterId = null, progress = null) {
   const calculation = routeCalculationFor(route, characterId);
   if (!calculation) return [];
@@ -342,6 +372,7 @@ export function buildRoute(input, previous = null) {
     coverageArea,
     status,
     preference,
+    overrideGameRouting: input.overrideGameRouting === true,
     securityPenalty: Math.min(100, Math.max(0, Math.round(Number(input.securityPenalty ?? 50)))),
     originMode,
     origin,

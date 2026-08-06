@@ -8,6 +8,7 @@ import {
   duplicateRoute,
   itineraryFor,
   nextRouteNavigationAction,
+  overrideGameWaypoints,
   parseRouteImport,
   preferenceLabel,
   remainingRouteWormholes,
@@ -39,7 +40,8 @@ const state = {
     routePreference: 'Safer',
     securityPenalty: 50,
     alwaysUseThera: false,
-    alwaysUseTurnur: false
+    alwaysUseTurnur: false,
+    overrideGameRouting: false
   },
   editingRouteId: null,
   editorStops: [],
@@ -475,6 +477,7 @@ function assignedPilotProgress(character) {
     lastSystemId: progress.lastSystemId,
     onRoute: progress.onRoute,
     sentWaypointKey: previous?.sentWaypointKey || null,
+    sentThroughSystemIndex: Number.isInteger(previous?.sentThroughSystemIndex) ? previous.sentThroughSystemIndex : null,
     waypointAttemptKey: previous?.waypointAttemptKey || null,
     waypointAttemptedAt: previous?.waypointAttemptedAt || null,
     waypointError: previous?.waypointError || null,
@@ -507,6 +510,11 @@ async function advancePilotWaypoint(character, assignment) {
   }
   if (!canSetEsiWaypoint(action.destination)) return { ...character, routeProgress: assignment.progress };
   const previous = assignment.progress;
+  if (assignment.route.overrideGameRouting
+    && Number.isInteger(previous.sentThroughSystemIndex)
+    && previous.sentThroughSystemIndex >= action.systemIndex) {
+    return { ...character, routeProgress: previous };
+  }
   if (previous.sentWaypointKey === action.key) return { ...character, routeProgress: previous };
   const lastAttempt = Date.parse(previous.waypointAttemptedAt || 0) || 0;
   if (previous.waypointAttemptKey === action.key && lastAttempt > Date.now() - 60_000) {
@@ -514,7 +522,8 @@ async function advancePilotWaypoint(character, assignment) {
   }
   const attemptedAt = new Date().toISOString();
   try {
-    await esi.setWaypoint(character.id, action.destination.id, !previous.sentWaypointKey);
+    const delivery = navigationDelivery(assignment.route, assignment.calculation, character, previous);
+    await submitNavigationDelivery(character, delivery, assignment.route.overrideGameRouting || !previous.sentWaypointKey);
     return {
       ...character,
       routeProgress: {
@@ -522,7 +531,10 @@ async function advancePilotWaypoint(character, assignment) {
         sentWaypointKey: action.key,
         waypointAttemptKey: action.key,
         waypointAttemptedAt: attemptedAt,
-        waypointError: null
+        waypointError: null,
+        sentThroughSystemIndex: assignment.route.overrideGameRouting
+          ? delivery.sentThroughSystemIndex
+          : previous.sentThroughSystemIndex ?? null
       }
     };
   } catch (error) {
@@ -539,9 +551,37 @@ async function advancePilotWaypoint(character, assignment) {
   }
 }
 
-function initialNavigationAction(route, calculation, character) {
+function navigationDelivery(route, calculation, character, progress) {
+  const stagedRoute = { ...route, calculations: [calculation] };
+  const action = nextRouteNavigationAction(stagedRoute, character, progress);
+  if (!action || action.kind !== 'waypoint') return { action, waypoints: [], sentThroughSystemIndex: null };
+  if (!route.overrideGameRouting) {
+    return {
+      action,
+      waypoints: canSetEsiWaypoint(action.destination) ? [action.destination] : [],
+      sentThroughSystemIndex: null
+    };
+  }
+
+  let waypoints = overrideGameWaypoints(stagedRoute, character.id, progress).filter(canSetEsiWaypoint);
+  if (!waypoints.length && canSetEsiWaypoint(action.destination)) {
+    waypoints = [{ ...action.destination, systemIndex: action.systemIndex }];
+  }
+  const sentThroughSystemIndex = waypoints.reduce((maximum, waypoint) => (
+    Number.isInteger(waypoint.systemIndex) ? Math.max(maximum, waypoint.systemIndex) : maximum
+  ), -1);
+  return { action, waypoints, sentThroughSystemIndex: sentThroughSystemIndex >= 0 ? sentThroughSystemIndex : null };
+}
+
+function initialNavigationDelivery(route, calculation, character) {
   const progress = advanceRouteProgress(calculation.systems, character.location?.id);
-  return nextRouteNavigationAction({ ...route, calculations: [calculation] }, character, progress);
+  return navigationDelivery(route, calculation, character, progress);
+}
+
+async function submitNavigationDelivery(character, delivery, clearOtherWaypoints = true) {
+  if (!delivery.waypoints.length) return null;
+  await esi.setWaypoints(character.id, delivery.waypoints.map((waypoint) => waypoint.id), clearOtherWaypoints);
+  return delivery.action?.key || null;
 }
 
 function jumpMarkerMarkup(routeSystem) {
@@ -776,6 +816,7 @@ function renderSettings() {
   $('settings-security-penalty-field').hidden = preference === 'Shorter';
   $('settings-always-thera').checked = state.settings.alwaysUseThera === true;
   $('settings-always-turnur').checked = state.settings.alwaysUseTurnur === true;
+  $('settings-override-game-routing').checked = state.settings.overrideGameRouting === true;
   if (state.graph) {
     $('settings-sde-build').textContent = state.graph.version || 'Unknown';
     $('settings-sde-date').textContent = formatDate(state.graph.releaseDate);
@@ -1403,6 +1444,9 @@ function openRouteEditor(route = null) {
   $('route-notes').value = route?.notes || '';
   $('security-penalty').value = route?.securityPenalty ?? routingSecurityPenalty();
   $('security-penalty-output').textContent = $('security-penalty').value;
+  $('route-override-game-routing').checked = route
+    ? route.overrideGameRouting === true
+    : state.settings.overrideGameRouting === true;
   const preference = route?.preference || routingPreference();
   document.querySelector(`input[name="preference"][value="${preference}"]`).checked = true;
   updateOriginMode();
@@ -1546,6 +1590,7 @@ async function saveRoute(event) {
       assignedCharacterIds,
       stopAssignments: [],
       preference: document.querySelector('input[name="preference"]:checked')?.value || routingPreference(),
+      overrideGameRouting: $('route-override-game-routing').checked,
       securityPenalty: $('security-penalty').value,
       status: $('route-status').value,
       notes: $('route-notes').value,
@@ -1689,6 +1734,7 @@ function renderRouteAssignment() {
   $('assignment-wormhole-turnur').disabled = state.settingRoutes;
   document.querySelectorAll('input[name="assignment-preference"]').forEach((input) => { input.disabled = state.settingRoutes; });
   $('assignment-security-penalty').disabled = state.settingRoutes;
+  $('assignment-override-game-routing').disabled = state.settingRoutes;
   updateAssignmentPreference();
   renderWormholeStatuses();
   $('route-assignment-title').textContent = `Assign pilots · ${route.name}`;
@@ -1739,6 +1785,7 @@ function openRouteAssignment(route) {
   document.querySelector(`input[name="assignment-preference"][value="${preference}"]`).checked = true;
   $('assignment-security-penalty').value = route.securityPenalty ?? routingSecurityPenalty();
   $('assignment-security-penalty-output').textContent = $('assignment-security-penalty').value;
+  $('assignment-override-game-routing').checked = route.overrideGameRouting === true;
   $('route-assignment-status').textContent = '';
   $('route-assignment-status').classList.remove('is-error');
   renderRouteAssignment();
@@ -1819,6 +1866,7 @@ function openAdHocRouteDialog() {
   document.querySelector(`input[name="ad-hoc-preference"][value="${preference}"]`).checked = true;
   $('ad-hoc-security-penalty').value = routingSecurityPenalty();
   $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value;
+  $('ad-hoc-override-game-routing').checked = state.settings.overrideGameRouting === true;
   setAdHocStatus();
   renderAdHocRouteDialog();
   if (!$('ad-hoc-route-dialog').open) $('ad-hoc-route-dialog').showModal();
@@ -2019,6 +2067,7 @@ async function setAdHocRoute() {
     wormholeHubs: selectedAdHocWormholeHubs(),
     assignedCharacterIds: selected.map((character) => character.id),
     preference: document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || routingPreference(),
+    overrideGameRouting: $('ad-hoc-override-game-routing').checked,
     securityPenalty: $('ad-hoc-security-penalty').value,
     status: 'ready',
     notes: '',
@@ -2046,23 +2095,26 @@ async function setAdHocRoute() {
       await waitForPaint();
       const [calculation] = calculateAssignedItineraries(seed, [character]);
       if (!calculation) throw new Error('A route could not be calculated from the pilot’s current location.');
-      const action = initialNavigationAction(seed, calculation, character);
+      const delivery = initialNavigationDelivery(seed, calculation, character);
+      const action = delivery.action;
       let sentWaypointKey = null;
       if (action?.kind === 'waypoint') {
-        if (!canSetEsiWaypoint(action.destination)) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
-        setAdHocStatus(`Setting ${character.name} · ${action.destination.name}…`);
+        if (!delivery.waypoints.length) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
+        const destinationLabel = seed.overrideGameRouting
+          ? `${delivery.waypoints.length} calculated waypoint${delivery.waypoints.length === 1 ? '' : 's'}`
+          : action.destination.name;
+        setAdHocStatus(`Setting ${character.name} · ${destinationLabel}…`);
         await waitForPaint();
-        await esi.setWaypoint(character.id, action.destination.id, true);
-        sentWaypointKey = action.key;
+        sentWaypointKey = await submitNavigationDelivery(character, delivery, true);
       } else if (action?.kind === 'wormhole') {
         setAdHocStatus(`${character.name} is at the wormhole · warp to SIG ${action.wormhole.signatureId}…`);
       } else if (canSetEsiWaypoint(destination)) {
         setAdHocStatus(`Setting ${character.name} · ${destination.name}…`);
         await waitForPaint();
-        await esi.setWaypoint(character.id, destination.id, true);
+        await esi.setWaypoints(character.id, [destination.id], true);
       }
       calculations.push(calculation);
-      successful.push({ character, sentWaypointKey });
+      successful.push({ character, sentWaypointKey, sentThroughSystemIndex: delivery.sentThroughSystemIndex });
     } catch (error) {
       failed.push({ character: selectedCharacter, error });
     }
@@ -2079,7 +2131,7 @@ async function setAdHocRoute() {
       lastSentAt: now
     }, seed);
 
-    const changedCharacters = successful.map(({ character, sentWaypointKey }) => {
+    const changedCharacters = successful.map(({ character, sentWaypointKey, sentThroughSystemIndex }) => {
       const directCharacter = { ...character, directRoute };
       const assignment = assignedPilotProgress(directCharacter);
       if (!assignment) return directCharacter;
@@ -2090,7 +2142,8 @@ async function setAdHocRoute() {
           sentWaypointKey,
           waypointAttemptKey: sentWaypointKey,
           waypointAttemptedAt: sentWaypointKey ? now : null,
-          waypointError: null
+          waypointError: null,
+          sentThroughSystemIndex
         }
       };
     });
@@ -2125,6 +2178,7 @@ async function saveRouteAssignments(event) {
     ...route,
     wormholeHubs: selectedAssignmentWormholeHubs(),
     preference: document.querySelector('input[name="assignment-preference"]:checked')?.value || route.preference || routingPreference(),
+    overrideGameRouting: $('assignment-override-game-routing').checked,
     securityPenalty: $('assignment-security-penalty').value,
     assignedCharacterIds: selected.map((character) => character.id),
     stopAssignments: [],
@@ -2146,15 +2200,20 @@ async function saveRouteAssignments(event) {
       await waitForPaint();
       const [calculation] = calculateAssignedItineraries(seed, [character]);
       if (!calculation) throw new Error('A route could not be calculated from the pilot’s current location.');
-      const action = initialNavigationAction(seed, calculation, character);
-      if (action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination)) {
-        status.textContent = `Setting ${character.name} · ${action.destination.name}…`;
-        await esi.setWaypoint(character.id, action.destination.id, true);
+      const delivery = initialNavigationDelivery(seed, calculation, character);
+      const action = delivery.action;
+      if (action?.kind === 'waypoint') {
+        if (!delivery.waypoints.length) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
+        const destinationLabel = seed.overrideGameRouting
+          ? `${delivery.waypoints.length} calculated waypoint${delivery.waypoints.length === 1 ? '' : 's'}`
+          : action.destination.name;
+        status.textContent = `Setting ${character.name} · ${destinationLabel}…`;
+        await submitNavigationDelivery(character, delivery, true);
       } else if (action?.kind === 'wormhole') {
         status.textContent = `${character.name} is at the wormhole · warp to SIG ${action.wormhole.signatureId}…`;
       }
       calculations.push(calculation);
-      successful.push({ character, action });
+      successful.push({ character, action, delivery });
     } catch (error) {
       failed.push({ character: selectedCharacter, error });
     }
@@ -2171,7 +2230,7 @@ async function saveRouteAssignments(event) {
     }, route);
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
-    const changedCharacters = successful.map(({ character, action }) => {
+    const changedCharacters = successful.map(({ character, action, delivery }) => {
       const routedCharacter = { ...character, directRoute: null };
       const assignment = assignedPilotProgress(routedCharacter);
       if (!assignment) return routedCharacter;
@@ -2183,7 +2242,8 @@ async function saveRouteAssignments(event) {
           sentWaypointKey: sent,
           waypointAttemptKey: sent,
           waypointAttemptedAt: sent ? now : null,
-          waypointError: null
+          waypointError: null,
+          sentThroughSystemIndex: delivery.sentThroughSystemIndex
         }
       };
     });
@@ -2254,11 +2314,13 @@ async function sendRouteToAutopilot(route) {
       };
       calculations = calculations.filter((item) => item.characterId !== character.id);
       calculations.push(calculation);
-      const action = initialNavigationAction(route, calculation, character);
-      if (action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination)) {
-        await esi.setWaypoint(character.id, action.destination.id, true);
+      const delivery = initialNavigationDelivery(route, calculation, character);
+      const action = delivery.action;
+      if (action?.kind === 'waypoint') {
+        if (!delivery.waypoints.length) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
+        await submitNavigationDelivery(character, delivery, true);
       }
-      results.push({ character, calculation, action, ok: true });
+      results.push({ character, calculation, action, delivery, ok: true });
     } catch (error) {
       results.push({ character, ok: false, error });
     }
@@ -2275,7 +2337,7 @@ async function sendRouteToAutopilot(route) {
     };
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
-    const changedCharacters = successful.map(({ character, action }) => {
+    const changedCharacters = successful.map(({ character, action, delivery }) => {
       const routedCharacter = { ...character, directRoute: null };
       const assignment = assignedPilotProgress(routedCharacter);
       if (!assignment) return routedCharacter;
@@ -2287,7 +2349,8 @@ async function sendRouteToAutopilot(route) {
           sentWaypointKey: sent,
           waypointAttemptKey: sent,
           waypointAttemptedAt: sent ? updated.lastSentAt : null,
-          waypointError: null
+          waypointError: null,
+          sentThroughSystemIndex: delivery?.sentThroughSystemIndex ?? null
         }
       };
     });
@@ -2805,6 +2868,14 @@ function bindEvents() {
       toast(error.message, 'error');
     }
   }));
+  $('settings-override-game-routing').addEventListener('change', async () => {
+    try {
+      await updateSetting('overrideGameRouting', $('settings-override-game-routing').checked);
+      renderSettings();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
   $('erase-data').addEventListener('click', eraseAllData);
   window.addEventListener('storage', async () => {
     state.routes = await store.getAll('routes');
@@ -2826,6 +2897,7 @@ async function initialize() {
       securityPenalty,
       alwaysUseThera,
       alwaysUseTurnur,
+      overrideGameRouting,
       routeSearch,
       routeStatus,
       routeSort,
@@ -2840,6 +2912,7 @@ async function initialize() {
       store.getSetting('securityPenalty', 50),
       store.getSetting('alwaysUseThera', false),
       store.getSetting('alwaysUseTurnur', false),
+      store.getSetting('overrideGameRouting', false),
       store.getSetting('route-search', ''),
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
@@ -2854,7 +2927,8 @@ async function initialize() {
       routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
       securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
       alwaysUseThera: alwaysUseThera === true,
-      alwaysUseTurnur: alwaysUseTurnur === true
+      alwaysUseTurnur: alwaysUseTurnur === true,
+      overrideGameRouting: overrideGameRouting === true
     };
     $('route-search').value = typeof routeSearch === 'string' ? routeSearch : '';
     $('route-status-filter').value = ['all', 'ready', 'draft', 'archived'].includes(routeStatus) ? routeStatus : 'all';

@@ -420,6 +420,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .settings-check-option span { display: grid; min-width: 0; }
 .settings-check-option strong { font-size: 10px; }
 .settings-check-option small { color: var(--muted); font-size: 8px; }
+.settings-override-option { width: 100%; }
 .field { display: grid; gap: 7px; margin-top: 16px; }
 .field > span, fieldset > legend { color: var(--muted-strong); font-size: 11px; font-weight: 750; }
 .field > span small { color: var(--muted); font-weight: 500; }
@@ -542,6 +543,11 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .preference-fieldset input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel-soft)); box-shadow: inset 0 0 0 1px var(--accent); }
 .preference-fieldset strong { font-size: 12px; }
 .preference-fieldset small { color: var(--muted); font-size: 9px; }
+.routing-override-option { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 11px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: var(--control-radius); cursor: pointer; }
+.routing-override-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.routing-override-option span { display: grid; min-width: 0; }
+.routing-override-option strong { font-size: 11px; }
+.routing-override-option small { color: var(--muted); font-size: 9px; }
 .range-field > span { display: flex; justify-content: space-between; }
 .range-field output { color: var(--accent); }
 .range-field input { padding: 0; accent-color: var(--accent); box-shadow: none; border: 0; }
@@ -567,7 +573,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .ad-hoc-route-dialog .modal-footer { flex-wrap: wrap; }
 .ad-hoc-route-dialog .modal-status { flex: 1 1 280px; color: var(--text); line-height: 1.35; }
 .ad-hoc-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.ad-hoc-destination-field, .ad-hoc-character-picker, .ad-hoc-preference-fieldset, #ad-hoc-security-penalty-field, .ad-hoc-wormholes, .ad-hoc-avoid-builder, .ad-hoc-connection-builder { grid-column: 1 / -1; }
+.ad-hoc-destination-field, .ad-hoc-character-picker, .ad-hoc-preference-fieldset, #ad-hoc-security-penalty-field, .ad-hoc-override-option, .ad-hoc-wormholes, .ad-hoc-avoid-builder, .ad-hoc-connection-builder { grid-column: 1 / -1; }
 .ad-hoc-destination-field { margin-top: 0; }
 .ad-hoc-character-picker { margin-top: 16px; }
 .ad-hoc-preference-fieldset { margin-top: 16px; }
@@ -579,6 +585,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .assignment-wormholes { margin: 0 0 18px; }
 .assignment-preference-fieldset { margin: 0 0 12px; }
 #assignment-security-penalty-field { margin: 0 0 18px; }
+.assignment-override-option { margin-bottom: 18px; }
 .assignment-character-picker { margin-top: 0; }
 .assignment-character-heading { margin-bottom: 8px; }
 .assignment-coverage { display: grid; gap: 10px; margin-top: 18px; }

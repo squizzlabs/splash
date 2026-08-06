@@ -347,4 +347,11 @@ export class ESIClient {
     });
     return this.request(`/ui/autopilot/waypoint?${params}`, { method: 'POST', characterId });
   }
+
+  async setWaypoints(characterId, destinationIds, clearOtherWaypoints = true) {
+    const ids = [...destinationIds].map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
+    for (let index = 0; index < ids.length; index += 1) {
+      await this.setWaypoint(characterId, ids[index], clearOtherWaypoints && index === 0);
+    }
+  }
 }
