@@ -8,7 +8,7 @@ Just The Trip is a static, browser-only EVE Online route planner. It keeps route
 - Check each character's online state through ESI and only request live services for online pilots.
 - Read each online character's current solar system and active ship through ESI.
 - Create routes from a fixed system or each assigned character's live location.
-- Set an immediate “Take me to…” route for one or more online pilots with destination autocomplete and the full routing options, without a separate assignment step.
+- Set an immediate, per-pilot “Take me to…” route with destination autocomplete and the full routing options, without creating a saved/exported route or requiring a separate assignment step.
 - Start new routes from the selected online character's live location by default.
 - Add solar systems or NPC stations as ordered stops, or insert a selected pilot's exact live station/structure location; the final stop is the route endpoint.
 - Calculate shortest, safer, and less-secure routes in-browser with A*.

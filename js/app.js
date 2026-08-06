@@ -61,6 +61,7 @@ const state = {
   wormholeError: null,
   wormholeLoading: false,
   wormholePromise: null,
+  expandedProgressCharacterIds: new Set(),
   sloganTimer: null
 };
 
@@ -308,6 +309,11 @@ function selectedCharacters(route) {
   return state.characters.filter((character) => ids.has(character.id));
 }
 
+function soleOnlineCharacterSelection() {
+  const onlineCharacters = state.characters.filter(isCharacterOnline);
+  return new Set(onlineCharacters.length === 1 ? [onlineCharacters[0].id] : []);
+}
+
 let toastTimer;
 function toast(message, type = 'success') {
   const element = $('toast');
@@ -373,9 +379,14 @@ function routeOriginLabel(route) {
   return route.origin?.name || 'Unknown origin';
 }
 
-function assignedRouteForCharacter(characterId) {
+function assignedRouteForCharacter(characterOrId) {
+  const characterId = Number(typeof characterOrId === 'object' ? characterOrId?.id : characterOrId);
+  const character = typeof characterOrId === 'object'
+    ? characterOrId
+    : state.characters.find((item) => item.id === characterId);
+  if (character?.directRoute) return character.directRoute;
   return state.routes
-    .filter((route) => (route.assignedCharacterIds || []).map(Number).includes(Number(characterId)))
+    .filter((route) => (route.assignedCharacterIds || []).map(Number).includes(characterId))
     .sort((left, right) => {
       const leftTime = Date.parse(left.lastSentAt || left.updatedAt || 0) || 0;
       const rightTime = Date.parse(right.lastSentAt || right.updatedAt || 0) || 0;
@@ -388,7 +399,7 @@ function assignedCalculation(route, characterId) {
 }
 
 function assignedPilotProgress(character) {
-  const route = assignedRouteForCharacter(character.id);
+  const route = assignedRouteForCharacter(character);
   if (!route) return null;
   const calculation = assignedCalculation(route, character.id);
   const systems = calculation?.systems || [];
@@ -540,7 +551,21 @@ function wormholeInstructionMarkup(wormhole, assignment) {
   </div>`;
 }
 
-function routeProgressTimelineMarkup(assignment) {
+function routeSystemDetailMarkup(routeSystem) {
+  const system = state.graph.get(routeSystem.id);
+  const security = Number(system?.security);
+  const securityLabel = Number.isFinite(security) ? security.toFixed(1) : '—';
+  const region = state.graph.regions.get(Number(system?.regionId));
+  return `<div class="pilot-route-detail-row">
+    ${jumpMarkerMarkup(routeSystem)}
+    <strong>${escapeHtml(system?.name || routeSystem.name || `System ${routeSystem.id}`)}</strong>
+    <span class="pilot-route-detail-security">${securityLabel}</span>
+    <span>${escapeHtml(region?.name || 'Unknown region')}</span>
+  </div>`;
+}
+
+function routeProgressTimelineMarkup(assignment, character) {
+  const expanded = state.expandedProgressCharacterIds.has(character.id);
   const wormholes = remainingRouteWormholes(
     assignment.route,
     assignment.calculation?.characterId,
@@ -551,7 +576,7 @@ function routeProgressTimelineMarkup(assignment) {
   let wormholeIndex = 0;
   const flushMarkers = () => {
     if (!markers.length) return;
-    parts.push(`<div class="pilot-jump-track">${markers.join('')}</div>`);
+    parts.push(`<div class="${expanded ? 'pilot-route-details' : 'pilot-jump-track'}">${markers.join('')}</div>`);
     markers = [];
   };
   const appendWormhole = (wormhole) => {
@@ -565,7 +590,7 @@ function routeProgressTimelineMarkup(assignment) {
       appendWormhole(wormholes[wormholeIndex]);
       wormholeIndex += 1;
     }
-    markers.push(jumpMarkerMarkup(routeSystem));
+    markers.push(expanded ? routeSystemDetailMarkup(routeSystem) : jumpMarkerMarkup(routeSystem));
     while (wormholeIndex < wormholes.length && routeIndex != null && Number(wormholes[wormholeIndex].fromIndex) === routeIndex) {
       appendWormhole(wormholes[wormholeIndex]);
       wormholeIndex += 1;
@@ -577,7 +602,12 @@ function routeProgressTimelineMarkup(assignment) {
   }
   flushMarkers();
   return parts.length
-    ? `<div class="pilot-route-timeline" aria-label="${assignment.jumpsRemaining} jumps remaining">${parts.join('')}</div>`
+    ? `<div class="pilot-route-timeline" aria-label="${assignment.jumpsRemaining} jumps remaining">
+        <button class="pilot-route-chevron ${expanded ? 'is-expanded' : ''}" type="button" data-progress-route-toggle="${character.id}" aria-expanded="${expanded}" aria-label="${expanded ? 'Hide' : 'Show'} route systems for ${escapeHtml(character.name)}">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"></path></svg>
+        </button>
+        <div class="pilot-route-sequence">${parts.join('')}</div>
+      </div>`
     : '';
 }
 
@@ -607,7 +637,7 @@ function renderAssignedPilots() {
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
       <div class="pilot-progress-jumps"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
-      ${routeProgressTimelineMarkup(assignment)}
+      ${routeProgressTimelineMarkup(assignment, character)}
       ${assignment.progress.waypointError && assignment.progress.waypointAttemptKey === assignment.nextAction?.key
         ? `<div class="pilot-waypoint-error">Could not set next waypoint: ${escapeHtml(assignment.progress.waypointError)}</div>`
         : ''}
@@ -1658,7 +1688,7 @@ function renderRouteAssignment() {
 
 function openRouteAssignment(route) {
   state.assigningRouteId = route.id;
-  state.assignmentCharacterIds = new Set();
+  state.assignmentCharacterIds = soleOnlineCharacterSelection();
   state.assignmentWormholeHubs = new Set(normalizeWormholeHubs(route.wormholeHubs));
   state.settingRoutes = false;
   $('route-assignment-status').textContent = '';
@@ -1730,7 +1760,7 @@ function renderAdHocRouteDialog() {
 function openAdHocRouteDialog() {
   hideSystemAutocomplete();
   $('ad-hoc-route-form').reset();
-  state.adHocCharacterIds = new Set();
+  state.adHocCharacterIds = soleOnlineCharacterSelection();
   state.adHocAvoidSystems = [];
   state.adHocConnections = [];
   state.adHocWormholeHubs = new Set();
@@ -1900,6 +1930,7 @@ async function clearSelectedPilotRoutes() {
 
     const changedCharacters = state.characters.filter((character) => successfulIds.has(character.id)).map((character) => ({
       ...character,
+      directRoute: null,
       routeProgress: null
     }));
     await store.putMany('characters', changedCharacters);
@@ -1987,32 +2018,20 @@ async function setAdHocRoute() {
   if (successful.length) {
     const now = new Date().toISOString();
     const successfulIds = new Set(successful.map(({ character }) => character.id));
-    const changedRoutes = state.routes.filter((route) => (
-      (route.assignedCharacterIds || []).some((characterId) => successfulIds.has(Number(characterId)))
-    )).map((route) => ({
-      ...route,
-      assignedCharacterIds: (route.assignedCharacterIds || []).filter((characterId) => !successfulIds.has(Number(characterId))),
-      calculations: ensureReferenceCalculation((route.calculations || [])
-        .filter((calculation) => calculation.characterId == null || !successfulIds.has(Number(calculation.characterId)))),
-      updatedAt: now
-    }));
-    const route = buildRoute({
+    const directRoute = buildRoute({
       ...seed,
       assignedCharacterIds: [...successfulIds],
       calculations: ensureReferenceCalculation(calculations),
       lastCalculatedAt: now,
       lastSentAt: now
     }, seed);
-    await store.putMany('routes', [...changedRoutes, route]);
-    const routeChanges = new Map(changedRoutes.map((changedRoute) => [changedRoute.id, changedRoute]));
-    state.routes = state.routes.map((existingRoute) => routeChanges.get(existingRoute.id) || existingRoute);
-    state.routes.push(route);
 
     const changedCharacters = successful.map(({ character, sentWaypointKey }) => {
-      const assignment = assignedPilotProgress(character);
-      if (!assignment) return character;
+      const directCharacter = { ...character, directRoute };
+      const assignment = assignedPilotProgress(directCharacter);
+      if (!assignment) return directCharacter;
       return {
-        ...character,
+        ...directCharacter,
         routeProgress: {
           ...assignment.progress,
           sentWaypointKey,
@@ -2098,11 +2117,12 @@ async function saveRouteAssignments(event) {
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
     const changedCharacters = successful.map(({ character, action }) => {
-      const assignment = assignedPilotProgress(character);
-      if (!assignment) return character;
+      const routedCharacter = { ...character, directRoute: null };
+      const assignment = assignedPilotProgress(routedCharacter);
+      if (!assignment) return routedCharacter;
       const sent = action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination) ? action.key : null;
       return {
-        ...character,
+        ...routedCharacter,
         routeProgress: {
           ...assignment.progress,
           sentWaypointKey: sent,
@@ -2201,11 +2221,12 @@ async function sendRouteToAutopilot(route) {
     await store.put('routes', updated);
     state.routes[state.routes.findIndex((item) => item.id === route.id)] = updated;
     const changedCharacters = successful.map(({ character, action }) => {
-      const assignment = assignedPilotProgress(character);
-      if (!assignment) return character;
+      const routedCharacter = { ...character, directRoute: null };
+      const assignment = assignedPilotProgress(routedCharacter);
+      if (!assignment) return routedCharacter;
       const sent = action?.kind === 'waypoint' && canSetEsiWaypoint(action.destination) ? action.key : null;
       return {
-        ...character,
+        ...routedCharacter,
         routeProgress: {
           ...assignment.progress,
           sentWaypointKey: sent,
@@ -2362,6 +2383,14 @@ function bindEvents() {
     } catch (error) {
       toast(`Could not remember the pilot filter: ${error.message}`, 'error');
     }
+  });
+  $('assigned-pilots-list').addEventListener('click', (event) => {
+    const toggle = event.target.closest('[data-progress-route-toggle]');
+    if (!toggle) return;
+    const characterId = Number(toggle.dataset.progressRouteToggle);
+    if (state.expandedProgressCharacterIds.has(characterId)) state.expandedProgressCharacterIds.delete(characterId);
+    else state.expandedProgressCharacterIds.add(characterId);
+    renderAssignedPilots();
   });
   $('routes-list').addEventListener('click', (event) => {
     const edit = event.target.closest('[data-route-edit]');
@@ -2721,7 +2750,9 @@ async function initialize() {
     prepareSystemAutocomplete();
     bindEvents();
     renderAll();
-    if (state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)) {
+    const hasWormholeRoute = state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)
+      || state.characters.some((character) => normalizeWormholeHubs(character.directRoute?.wormholeHubs).length);
+    if (hasWormholeRoute) {
       try {
         await refreshWormholeConnections();
         await hydrateSavedWormholeSteps();
