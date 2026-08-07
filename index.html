@@ -114,98 +114,102 @@
         <h1>Settings</h1>
       </div>
       <div class="settings-grid">
-        <section class="settings-card">
-          <div class="settings-card-heading">
-            <span class="settings-glyph">UI</span>
-            <div><h2>Appearance</h2><p>Choose the view that fits your bridge.</p></div>
-          </div>
-          <label class="field">
-            <span>Theme</span>
-            <select id="theme-select">
-              <option value="system">System's Setting</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Route density</span>
-            <select id="density-select">
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </label>
-        </section>
-        <section class="settings-card">
-          <div class="settings-card-heading">
-            <span class="settings-glyph">SDE</span>
-            <div><h2>Universe data</h2><p>The stargate graph is rebuilt automatically.</p></div>
-          </div>
-          <dl class="settings-facts">
-            <div><dt>Build</dt><dd id="settings-sde-build">Loading</dd></div>
-            <div><dt>Released</dt><dd id="settings-sde-date">—</dd></div>
-            <div><dt>Systems</dt><dd id="settings-system-count">—</dd></div>
-          </dl>
-        </section>
-        <section class="settings-card settings-card-wide settings-routing-card">
-          <div class="settings-card-heading">
-            <span class="settings-glyph">A*</span>
-            <div><h2>Routing</h2><p>Defaults used whenever a route is calculated.</p></div>
-          </div>
-          <div class="settings-routing-grid">
-            <fieldset class="preference-fieldset settings-preference-fieldset">
-              <legend>Route preference</legend>
-              <label><input type="radio" name="settings-route-preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
-              <label><input type="radio" name="settings-route-preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high security</small></span></label>
-              <label><input type="radio" name="settings-route-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
-            </fieldset>
-            <div class="settings-routing-secondary">
-              <label id="settings-security-penalty-field" class="field range-field">
-                <span>Security strictness <output id="settings-security-penalty-output">50</output></span>
-                <input id="settings-security-penalty" type="range" min="0" max="100" value="50">
-              </label>
-              <fieldset class="settings-shortcut-options">
-                <legend>Wormhole shortcuts</legend>
-                <label class="settings-check-option">
-                  <input id="settings-always-thera" type="checkbox">
-                  <span><strong>Always use Thera</strong><small>Selected by default in route planners</small></span>
-                </label>
-                <label class="settings-check-option">
-                  <input id="settings-always-turnur" type="checkbox">
-                  <span><strong>Always use Turnur</strong><small>Selected by default in route planners</small></span>
-                </label>
-              </fieldset>
-              <label class="settings-check-option settings-override-option">
-                <input id="settings-override-game-routing" type="checkbox">
-                <span><strong>Override Game Routing</strong><small>Add every calculated system as an ESI waypoint by default</small></span>
-              </label>
+        <div class="settings-column">
+          <section class="settings-card">
+            <div class="settings-card-heading">
+              <span class="settings-glyph">UI</span>
+              <div><h2>Appearance</h2><p>Choose the view that fits your bridge.</p></div>
             </div>
-          </div>
-        </section>
-        <section class="settings-card settings-card-wide">
-          <div class="settings-card-heading">
-            <span class="settings-glyph">I/O</span>
-            <div><h2>Import &amp; export</h2><p>Move route plans into or out of this browser.</p></div>
-          </div>
-          <div class="data-actions">
-            <button id="settings-export" class="button button-ghost" type="button">
-              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 14v5h14v-5"></path></svg>
-              Export routes
-            </button>
-            <button id="settings-import" class="button button-ghost" type="button">
-              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 19h14"></path></svg>
-              Import routes
-            </button>
-          </div>
-        </section>
-        <section class="settings-card settings-card-wide danger-card">
-          <div class="settings-card-heading">
-            <span class="settings-glyph">!</span>
-            <div><h2>Local data</h2><p>Routes, locations, and tokens never leave this browser except when you call EVE services.</p></div>
-          </div>
-          <div class="data-actions">
-            <button id="erase-data" class="button button-danger" type="button">Erase all local data</button>
-          </div>
-        </section>
+            <label class="field">
+              <span>Theme</span>
+              <select id="theme-select">
+                <option value="system">System's Setting</option>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Route progress</span>
+              <select id="route-progress-display">
+                <option value="compact">Compact</option>
+                <option value="expanded">Expanded</option>
+              </select>
+            </label>
+          </section>
+          <section class="settings-card">
+            <div class="settings-card-heading">
+              <span class="settings-glyph">I/O</span>
+              <div><h2>Import &amp; export</h2><p>Move route plans into or out of this browser.</p></div>
+            </div>
+            <div class="data-actions">
+              <button id="settings-export" class="button button-ghost" type="button">
+                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 14v5h14v-5"></path></svg>
+                Export routes
+              </button>
+              <button id="settings-import" class="button button-ghost" type="button">
+                <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 19h14"></path></svg>
+                Import routes
+              </button>
+            </div>
+          </section>
+          <section class="settings-card danger-card">
+            <div class="settings-card-heading">
+              <span class="settings-glyph">!</span>
+              <div><h2>Local data</h2><p>Routes, locations, and tokens never leave this browser except when you call EVE services.</p></div>
+            </div>
+            <div class="data-actions">
+              <button id="erase-data" class="button button-danger" type="button">Erase all local data</button>
+            </div>
+          </section>
+        </div>
+        <div class="settings-column">
+          <section class="settings-card settings-routing-card">
+            <div class="settings-card-heading">
+              <span class="settings-glyph">A*</span>
+              <div><h2>Routing</h2><p>Defaults used whenever a route is calculated.</p></div>
+            </div>
+            <div class="settings-routing-grid">
+              <fieldset class="preference-fieldset settings-preference-fieldset">
+                <legend>Route preference</legend>
+                <label><input type="radio" name="settings-route-preference" value="Shorter"><span><strong>Shortest</strong><small>Fewest jumps</small></span></label>
+                <label><input type="radio" name="settings-route-preference" value="Safer" checked><span><strong>Safest</strong><small>Favor high security</small></span></label>
+                <label><input type="radio" name="settings-route-preference" value="LessSecure"><span><strong>Less secure</strong><small>Favor low security</small></span></label>
+              </fieldset>
+              <div class="settings-routing-secondary">
+                <label id="settings-security-penalty-field" class="field range-field">
+                  <span>Security strictness <output id="settings-security-penalty-output">50</output></span>
+                  <input id="settings-security-penalty" type="range" min="0" max="100" value="50">
+                </label>
+                <fieldset class="settings-shortcut-options">
+                  <legend>Wormhole shortcuts</legend>
+                  <label class="settings-check-option">
+                    <input id="settings-always-thera" type="checkbox">
+                    <span><strong>Always use Thera</strong><small>Selected by default in route planners</small></span>
+                  </label>
+                  <label class="settings-check-option">
+                    <input id="settings-always-turnur" type="checkbox">
+                    <span><strong>Always use Turnur</strong><small>Selected by default in route planners</small></span>
+                  </label>
+                </fieldset>
+                <label class="settings-check-option settings-override-option">
+                  <input id="settings-override-game-routing" type="checkbox">
+                  <span><strong>Override Game Routing</strong><small>Add every calculated system as an ESI waypoint by default</small></span>
+                </label>
+              </div>
+            </div>
+          </section>
+          <section class="settings-card">
+            <div class="settings-card-heading">
+              <span class="settings-glyph">SDE</span>
+              <div><h2>Universe data</h2><p>The stargate graph is rebuilt automatically.</p></div>
+            </div>
+            <dl class="settings-facts">
+              <div><dt>Build</dt><dd id="settings-sde-build">Loading</dd></div>
+              <div><dt>Released</dt><dd id="settings-sde-date">—</dd></div>
+              <div><dt>Systems</dt><dd id="settings-system-count">—</dd></div>
+            </dl>
+          </section>
+        </div>
       </div>
     </section>
   </main>

@@ -38,7 +38,7 @@ const state = {
   characters: [],
   settings: {
     theme: 'system',
-    density: 'comfortable',
+    routeProgressDisplay: 'compact',
     routePreference: 'Safer',
     securityPenalty: 50,
     alwaysUseThera: false,
@@ -72,7 +72,7 @@ const state = {
   wormholeError: null,
   wormholeLoading: false,
   wormholePromise: null,
-  expandedProgressCharacterIds: new Set(),
+  progressDisplayOverrides: new Map(),
   sloganTimer: null
 };
 
@@ -373,7 +373,6 @@ function waitForPaint() {
 function applyAppearance() {
   if (state.settings.theme === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.dataset.theme = state.settings.theme;
-  document.documentElement.dataset.density = state.settings.density;
 }
 
 function showView(name) {
@@ -644,7 +643,9 @@ function routeSystemDetailMarkup(routeSystem) {
 }
 
 function routeProgressTimelineMarkup(assignment, character) {
-  const expanded = state.expandedProgressCharacterIds.has(character.id);
+  const expanded = state.progressDisplayOverrides.has(character.id)
+    ? state.progressDisplayOverrides.get(character.id)
+    : state.settings.routeProgressDisplay === 'expanded';
   const wormholes = remainingRouteWormholes(
     assignment.route,
     assignment.calculation?.characterId,
@@ -830,7 +831,7 @@ function renderCharacters() {
 
 function renderSettings() {
   $('theme-select').value = state.settings.theme;
-  $('density-select').value = state.settings.density;
+  $('route-progress-display').value = state.settings.routeProgressDisplay;
   const preference = routingPreference();
   const preferenceInput = document.querySelector(`input[name="settings-route-preference"][value="${preference}"]`);
   if (preferenceInput) preferenceInput.checked = true;
@@ -2529,8 +2530,10 @@ function bindEvents() {
     const toggle = event.target.closest('[data-progress-route-toggle]');
     if (!toggle) return;
     const characterId = Number(toggle.dataset.progressRouteToggle);
-    if (state.expandedProgressCharacterIds.has(characterId)) state.expandedProgressCharacterIds.delete(characterId);
-    else state.expandedProgressCharacterIds.add(characterId);
+    const expanded = state.progressDisplayOverrides.has(characterId)
+      ? state.progressDisplayOverrides.get(characterId)
+      : state.settings.routeProgressDisplay === 'expanded';
+    state.progressDisplayOverrides.set(characterId, !expanded);
     renderAssignedPilots();
   });
   $('routes-list').addEventListener('click', (event) => {
@@ -2856,8 +2859,14 @@ function bindEvents() {
   $('theme-select').addEventListener('change', async () => {
     try { await updateSetting('theme', $('theme-select').value); } catch (error) { toast(error.message, 'error'); }
   });
-  $('density-select').addEventListener('change', async () => {
-    try { await updateSetting('density', $('density-select').value); } catch (error) { toast(error.message, 'error'); }
+  $('route-progress-display').addEventListener('change', async () => {
+    try {
+      await updateSetting('routeProgressDisplay', $('route-progress-display').value);
+      state.progressDisplayOverrides.clear();
+      renderAssignedPilots();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
   });
   document.querySelectorAll('input[name="settings-route-preference"]').forEach((input) => input.addEventListener('change', async () => {
     try {
@@ -2915,7 +2924,7 @@ async function initialize() {
       routes,
       characters,
       theme,
-      density,
+      routeProgressDisplay,
       routePreference,
       securityPenalty,
       alwaysUseThera,
@@ -2930,7 +2939,7 @@ async function initialize() {
       store.getAll('routes'),
       store.getAll('characters'),
       store.getSetting('theme', 'system'),
-      store.getSetting('density', 'comfortable'),
+      store.getSetting('routeProgressDisplay', 'compact'),
       store.getSetting('routePreference', 'Safer'),
       store.getSetting('securityPenalty', 50),
       store.getSetting('alwaysUseThera', false),
@@ -2946,7 +2955,7 @@ async function initialize() {
     state.characters = characters.sort((a, b) => a.name.localeCompare(b.name));
     state.settings = {
       theme,
-      density,
+      routeProgressDisplay: routeProgressDisplay === 'expanded' ? 'expanded' : 'compact',
       routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
       securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
       alwaysUseThera: alwaysUseThera === true,

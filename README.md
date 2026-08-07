@@ -21,7 +21,7 @@ Just The Trip is a static, browser-only EVE Online route planner. It keeps route
 - Create, inspect, update, duplicate, archive, and delete routes.
 - Avoid systems and add custom one-way connections such as jump bridges.
 - Import and export portable route JSON without exposing character tokens.
-- Follow dark, light, or system appearance settings.
+- Follow dark, light, or system appearance settings, with compact or expanded route-progress defaults.
 
 ## EVE SSO setup
 
