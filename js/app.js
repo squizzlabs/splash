@@ -845,7 +845,7 @@ function renderSettings() {
   if (preferenceInput) preferenceInput.checked = true;
   $('settings-security-penalty').value = routingSecurityPenalty();
   $('settings-security-penalty-output').textContent = routingSecurityPenalty();
-  $('settings-security-penalty-field').hidden = preference === 'Shorter';
+  setSecurityPenaltyDisabled('settings-security-penalty-field', 'settings-security-penalty', preference === 'Shorter');
   $('settings-always-thera').checked = state.settings.alwaysUseThera === true;
   $('settings-always-turnur').checked = state.settings.alwaysUseTurnur === true;
   $('settings-override-game-routing').checked = state.settings.overrideGameRouting === true;
@@ -1263,7 +1263,14 @@ async function generateCoverageStops() {
 
 function updatePreference() {
   const preference = document.querySelector('input[name="preference"]:checked')?.value || routingPreference();
-  $('security-penalty-field').hidden = preference === 'Shorter';
+  setSecurityPenaltyDisabled('security-penalty-field', 'security-penalty', preference === 'Shorter');
+}
+
+function setSecurityPenaltyDisabled(fieldId, inputId, disabled) {
+  const field = $(fieldId);
+  field.hidden = false;
+  field.classList.toggle('is-disabled', disabled);
+  $(inputId).disabled = disabled;
 }
 
 function updateCurrentLocationButton() {
@@ -1754,7 +1761,11 @@ function currentAssignmentRoute() {
 
 function updateAssignmentPreference() {
   const preference = document.querySelector('input[name="assignment-preference"]:checked')?.value || routingPreference();
-  $('assignment-security-penalty-field').hidden = preference === 'Shorter';
+  setSecurityPenaltyDisabled(
+    'assignment-security-penalty-field',
+    'assignment-security-penalty',
+    state.settingRoutes || preference === 'Shorter'
+  );
 }
 
 function renderRouteAssignment() {
@@ -1844,7 +1855,11 @@ function setAdHocStatus(message = '', isError = false) {
 
 function updateAdHocPreference() {
   const preference = document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || routingPreference();
-  $('ad-hoc-security-penalty-field').hidden = preference === 'Shorter';
+  setSecurityPenaltyDisabled(
+    'ad-hoc-security-penalty-field',
+    'ad-hoc-security-penalty',
+    state.settingAdHocRoute || preference === 'Shorter'
+  );
 }
 
 function renderAdHocRouteDialog() {
