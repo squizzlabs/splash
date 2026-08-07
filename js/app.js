@@ -634,9 +634,12 @@ function routeSystemDetailMarkup(routeSystem) {
   const security = Number(system?.security);
   const securityLabel = Number.isFinite(security) ? security.toFixed(1) : '—';
   const region = state.graph.regions.get(Number(system?.regionId));
+  const destinationName = routeSystem.isDockingStop && routeSystem.dockingStop?.name
+    ? routeSystem.dockingStop.name
+    : system?.name || routeSystem.name || `System ${routeSystem.id}`;
   return `<div class="pilot-route-detail-row">
     ${jumpMarkerMarkup(routeSystem)}
-    <strong>${escapeHtml(system?.name || routeSystem.name || `System ${routeSystem.id}`)}</strong>
+    <strong>${escapeHtml(destinationName)}</strong>
     <span class="pilot-route-detail-security">${securityLabel}</span>
     <span>${escapeHtml(region?.name || 'Unknown region')}</span>
   </div>`;
@@ -686,8 +689,9 @@ function routeProgressTimelineMarkup(assignment, character) {
     wormholeIndex += 1;
   }
   flushMarkers();
+  const remainingLabel = assignment.jumpsRemaining === 1 ? 'jump remaining' : 'jumps remaining';
   return parts.length
-    ? `<div class="pilot-route-timeline" aria-label="${assignment.jumpsRemaining} jumps remaining">
+    ? `<div class="pilot-route-timeline" aria-label="${assignment.jumpsRemaining} ${remainingLabel}">
         <button class="pilot-route-chevron ${expanded ? 'is-expanded' : ''}" type="button" data-progress-route-toggle="${character.id}" aria-expanded="${expanded}" aria-label="${expanded ? 'Hide' : 'Show'} route systems for ${escapeHtml(character.name)}">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"></path></svg>
         </button>
@@ -720,12 +724,15 @@ function renderAssignedPilots() {
       ? 'docking'
       : assignment.complete
         ? 'complete'
-        : 'jumps left';
+        : assignment.jumpsRemaining === 1
+          ? 'jump left'
+          : 'jumps left';
+    const jumpStatusClass = assignment.docking ? 'is-docking' : assignment.complete ? 'is-complete' : '';
     return `<article class="pilot-progress-row ${online ? '' : 'is-offline'}">
       <img src="${portraitUrl(character.id, 64)}" alt="">
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
-      <div class="pilot-progress-jumps"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
+      <div class="pilot-progress-jumps ${jumpStatusClass}"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
       ${routeProgressTimelineMarkup(assignment, character)}
       ${assignment.progress.waypointError && assignment.progress.waypointAttemptKey === assignment.nextAction?.key
         ? `<div class="pilot-waypoint-error">Could not set next waypoint: ${escapeHtml(assignment.progress.waypointError)}</div>`
@@ -772,7 +779,7 @@ function renderRoutes() {
   $('routes-list').innerHTML = routes.map((route) => {
     const crew = selectedCharacters(route);
     const coverage = route.mode === 'coverage';
-    const stops = route.stops?.length ? `${route.stops.length} ${coverage ? 'systems' : `stop${route.stops.length === 1 ? '' : 's'}`} · ` : '';
+    const stops = route.stops?.length ? `${route.stops.length} ${coverage ? `system${route.stops.length === 1 ? '' : 's'}` : `stop${route.stops.length === 1 ? '' : 's'}`} · ` : '';
     const wormholeLabel = normalizeWormholeHubs(route.wormholeHubs)
       .map((hub) => hub === 'thera' ? 'Thera' : 'Turnur')
       .join(' + ');
@@ -780,6 +787,7 @@ function renderRoutes() {
     const endpointLabel = coverage ? 'Coverage area' : 'Final stop';
     const endpointName = coverage ? route.coverageArea?.name || 'Unknown area' : route.stops?.at(-1)?.name || 'No stops';
     const jumpValue = jumpLabel(route);
+    const jumpMetricLabel = jumpValue === '1' ? 'jump' : 'jumps';
     return `<article class="route-row">
       <div class="route-primary">
         <div class="route-primary-top"><span class="status-pill status-${route.status}">${escapeHtml(route.status)}</span><span class="route-updated">${formatRelative(route.updatedAt)}</span></div>
@@ -789,7 +797,7 @@ function renderRoutes() {
       <div class="route-line">
         <div class="route-system"><span>${endpointLabel}</span><strong>${escapeHtml(endpointName)}</strong></div>
       </div>
-      <div class="route-metrics"><div class="metric"><strong>${jumpValue}</strong><span>jumps</span></div></div>
+      <div class="route-metrics"><div class="metric"><strong>${jumpValue}</strong><span>${jumpMetricLabel}</span></div></div>
       <div class="route-actions">
         <button class="route-edit" type="button" data-route-edit="${escapeHtml(route.id)}" aria-label="Edit ${escapeHtml(route.name)}" title="Edit route">
           <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"></path><path d="m13.5 6.5 4 4"></path></svg>
@@ -1683,8 +1691,9 @@ async function saveRoute(event) {
 function detailCalculationMarkup(route, calculation) {
   const character = calculation.characterId ? state.characters.find((item) => item.id === calculation.characterId) : null;
   const heading = character?.name || (route.originMode === 'fixed' ? 'Fixed route' : route.originMode === 'auto' ? 'Optimized route' : calculation.origin.name);
-  const coverageStops = route.mode === 'coverage' ? ` · ${calculation.stops?.length || 0} assigned systems` : '';
-  const headingMarkup = `<strong>${escapeHtml(heading)}</strong><span>${calculation.jumpCount} jumps${escapeHtml(coverageStops)} from ${escapeHtml(calculation.origin.name)}</span>`;
+  const coverageStopCount = calculation.stops?.length || 0;
+  const coverageStops = route.mode === 'coverage' ? ` · ${coverageStopCount} assigned system${coverageStopCount === 1 ? '' : 's'}` : '';
+  const headingMarkup = `<strong>${escapeHtml(heading)}</strong><span>${calculation.jumpCount} jump${calculation.jumpCount === 1 ? '' : 's'}${escapeHtml(coverageStops)} from ${escapeHtml(calculation.origin.name)}</span>`;
   const pathMarkup = `<ol class="system-path">${calculation.systems.map((system) => `<li>${escapeHtml(system.name)}</li>`).join('')}</ol>`;
   if (route.mode === 'coverage') {
     return `<details class="calculation-group coverage-calculation"><summary class="calculation-heading">${headingMarkup}</summary>${pathMarkup}</details>`;
@@ -1705,17 +1714,19 @@ function openRouteDetail(route) {
       ? routeOriginLabel(route)
       : route.origin.name;
   const coverage = route.mode === 'coverage';
+  const routeStopCount = route.stops?.length || 0;
   const via = coverage
-    ? `${route.stops?.length || 0} systems · optimized coverage`
-    : `${route.stops?.length || 0} ordered stop${route.stops?.length === 1 ? '' : 's'}`;
+    ? `${routeStopCount} system${routeStopCount === 1 ? '' : 's'} · optimized coverage`
+    : `${routeStopCount} ordered stop${routeStopCount === 1 ? '' : 's'}`;
   const endpointLabel = coverage ? (route.coverageArea?.type || 'Coverage') : 'Final stop';
   const endpointName = coverage ? route.coverageArea?.name || 'Unknown area' : route.stops?.at(-1)?.name || 'No stops';
   const preference = route.preference;
   const penalty = preference === 'Shorter' ? '' : ` · strictness ${route.securityPenalty}`;
+  const detailJumpValue = jumpLabel(route);
   $('route-detail-body').innerHTML = `
     <div class="detail-hero">
       <div class="detail-endpoint"><span>Origin</span><strong>${escapeHtml(originLabel)}</strong></div>
-      <div class="detail-jumps"><strong>${jumpLabel(route)}</strong><span>calculated jumps</span></div>
+      <div class="detail-jumps"><strong>${detailJumpValue}</strong><span>calculated jump${detailJumpValue === '1' ? '' : 's'}</span></div>
       <div class="detail-endpoint"><span>${escapeHtml(endpointLabel)}</span><strong>${escapeHtml(endpointName)}</strong></div>
     </div>
     <div class="detail-meta"><span>${escapeHtml(preferenceLabel(preference) + penalty)}</span><span>${escapeHtml(via)}</span><span>A* · SDE ${escapeHtml(state.graph.version)}</span><span>Updated ${escapeHtml(formatRelative(route.updatedAt))}</span></div>

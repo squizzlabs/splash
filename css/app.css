@@ -322,6 +322,9 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-identity strong { font-size: 13px; }
 .pilot-progress-identity span { display: block; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .pilot-progress-location span, .pilot-progress-jumps span { display: block; color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.pilot-progress-jumps span { color: var(--muted-strong); font-size: 9px; }
+.pilot-progress-jumps.is-complete span { color: var(--success); }
+.pilot-progress-jumps.is-docking span { color: var(--accent); }
 .pilot-progress-location strong { margin-top: 2px; font-size: 12px; }
 .pilot-progress-jumps { text-align: right; }
 .pilot-progress-jumps strong { display: block; font-size: 18px; line-height: 1.1; }
