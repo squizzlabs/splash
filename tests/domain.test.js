@@ -7,6 +7,7 @@ import {
   autopilotStopsFor,
   buildRoute,
   duplicateRoute,
+  gateSegmentWaypoints,
   itineraryFor,
   mergeCalculatedLegs,
   parseConnectionLines,
@@ -15,6 +16,7 @@ import {
   nextRouteNavigationAction,
   overrideGameWaypoints,
   remainingRouteWormholes,
+  routeDestinationState,
   routeRequestBody,
   routeNavigationStages,
   routeStopSystemIndexes,
@@ -211,6 +213,46 @@ test('station stops route through their solar system and retain their ESI destin
   assert.equal(route.stops.at(-1).kind, 'station');
 });
 
+test('station destinations remain in docking state until the pilot is docked there', () => {
+  const station = {
+    id: 60000001,
+    name: 'Delta I - Test Station',
+    kind: 'station',
+    systemId: systems.d.id,
+    systemName: systems.d.name
+  };
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [station],
+    assignedCharacterIds: [9001],
+    calculations: [{
+      key: '9001',
+      characterId: 9001,
+      origin: systems.a,
+      systems: [systems.a, systems.b, systems.c, systems.d]
+    }]
+  });
+  const progress = { systemIndex: 3, onRoute: true };
+  const inSystem = {
+    id: 9001,
+    location: { id: systems.d.id, stop: { ...systems.d, kind: 'system', systemId: systems.d.id, systemName: systems.d.name } }
+  };
+  const docked = {
+    ...inSystem,
+    location: { id: systems.d.id, stop: station }
+  };
+
+  assert.deepEqual(
+    routeDestinationState(route, inSystem, progress),
+    { complete: false, docking: true, requiresDocking: true, finalStop: station, finalSystemIndex: 3 }
+  );
+  assert.deepEqual(
+    routeDestinationState(route, docked, progress),
+    { complete: true, docking: false, requiresDocking: true, finalStop: station, finalSystemIndex: 3 }
+  );
+  assert.equal(routeDestinationState(route, docked, { systemIndex: 0 }).complete, false);
+});
+
 test('game routing override submits every calculated system and retains station stops in order', () => {
   const station = {
     id: 60000001,
@@ -292,6 +334,7 @@ test('wormhole navigation stages approach the hole, show its signature, and neve
   assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 0 }).map((waypoint) => waypoint.id), [systems.b.id]);
   assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 1 }), []);
   assert.deepEqual(overrideGameWaypoints(route, character.id, { systemIndex: 2 }), []);
+  assert.deepEqual(gateSegmentWaypoints(route, character, { systemIndex: 0, onRoute: true }).map((waypoint) => waypoint.id), [systems.b.id]);
 
   const approach = nextRouteNavigationAction(route, character, { systemIndex: 0, onRoute: true });
   assert.equal(approach.kind, 'waypoint');
@@ -302,11 +345,13 @@ test('wormhole navigation stages approach the hole, show its signature, and neve
   const firstHole = nextRouteNavigationAction(route, character, { systemIndex: 1, onRoute: true });
   assert.equal(firstHole.kind, 'wormhole');
   assert.equal(firstHole.wormhole.signatureId, 'INB-123');
+  assert.deepEqual(gateSegmentWaypoints(route, character, { systemIndex: 1, onRoute: true }), []);
 
   character.location.id = thera.id;
   const theraHole = nextRouteNavigationAction(route, character, { systemIndex: 2, onRoute: true });
   assert.equal(theraHole.kind, 'wormhole');
   assert.equal(theraHole.wormhole.signatureId, 'OUT-789');
+  assert.deepEqual(gateSegmentWaypoints(route, character, { systemIndex: 2, onRoute: true }), []);
 
   const [imported] = parseRouteImport(serializeRoutes([route]), [], [9001]);
   assert.deepEqual(imported.calculations[0].wormholeSteps.map((step) => step.signatureId), ['INB-123', 'OUT-789']);
@@ -323,6 +368,26 @@ test('the next regular waypoint is exposed only after the previous one is reache
   assert.equal(nextRouteNavigationAction(route, character, { systemIndex: 0, onRoute: true }).destination.id, systems.b.id);
   character.location = { id: systems.b.id, stop: { id: systems.b.id, kind: 'system' } };
   assert.equal(nextRouteNavigationAction(route, character, { systemIndex: 1, onRoute: true }).destination.id, systems.c.id);
+});
+
+test('ordinary route delivery queues every remaining stop in the gate segment', () => {
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.b, systems.c, systems.d],
+    assignedCharacterIds: [9001],
+    calculations: [{
+      key: '9001',
+      characterId: 9001,
+      origin: systems.a,
+      systems: [systems.a, systems.b, systems.c, systems.d]
+    }]
+  });
+  const character = { id: 9001, location: { id: systems.a.id, stop: { id: systems.a.id, kind: 'system' } } };
+
+  assert.deepEqual(
+    gateSegmentWaypoints(route, character, { systemIndex: 0, onRoute: true }).map((waypoint) => waypoint.id),
+    [systems.b.id, systems.c.id, systems.d.id]
+  );
 });
 
 test('structure stops route through their solar system and retain their ESI destination ID', () => {

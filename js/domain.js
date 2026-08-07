@@ -191,6 +191,29 @@ export function routeNavigationStages(route, characterId = null) {
   });
 }
 
+export function gateSegmentWaypoints(route, character, progress = null) {
+  const action = nextRouteNavigationAction(route, character, progress);
+  if (!action || action.kind !== 'waypoint') return [];
+  if (action.wormhole) {
+    return [{ ...action.destination, systemIndex: action.systemIndex }];
+  }
+
+  const stages = routeNavigationStages(route, character?.id);
+  const startIndex = stages.findIndex((stage) => stage.key === action.key);
+  if (startIndex < 0) return [{ ...action.destination, systemIndex: action.systemIndex }];
+
+  const waypoints = [];
+  for (let stageIndex = startIndex; stageIndex < stages.length; stageIndex += 1) {
+    const stage = stages[stageIndex];
+    if (stage.kind === 'wormhole') {
+      waypoints.push({ ...stage.wormhole.from, kind: 'system', systemIndex: stage.systemIndex });
+      break;
+    }
+    waypoints.push({ ...stage.destination, systemIndex: stage.systemIndex });
+  }
+  return waypoints;
+}
+
 export function overrideGameWaypoints(route, characterId = null, progress = null) {
   const calculation = routeCalculationFor(route, characterId);
   if (!calculation?.systems?.length) return [];
@@ -259,6 +282,32 @@ export function nextRouteNavigationAction(route, character, progress) {
     };
   }
   return null;
+}
+
+export function routeDestinationState(route, character, progress = null) {
+  const calculation = routeCalculationFor(route, character?.id);
+  const specifiedStops = route?.mode === 'coverage'
+    ? calculation?.stops || route?.stops || []
+    : route?.stops || [];
+  const finalStop = specifiedStops.at(-1) || null;
+  const finalSystemIndex = (calculation?.systems?.length || 0) - 1;
+  const finalSystemId = Number(finalStop?.systemId ?? finalStop?.id);
+  const requiresDocking = finalStop?.kind === 'station' || finalStop?.kind === 'structure';
+  const atFinalSystem = finalSystemIndex >= 0
+    && Number(progress?.systemIndex) === finalSystemIndex
+    && Number(character?.location?.id) === finalSystemId
+    && Number(calculation.systems[finalSystemIndex]?.id) === finalSystemId;
+  const docked = requiresDocking
+    && atFinalSystem
+    && Number(character?.location?.stop?.id) === Number(finalStop.id);
+
+  return {
+    complete: atFinalSystem && (!requiresDocking || docked),
+    docking: atFinalSystem && requiresDocking && !docked,
+    requiresDocking,
+    finalStop,
+    finalSystemIndex
+  };
 }
 
 export function routeRequestBody(route) {

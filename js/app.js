@@ -6,12 +6,14 @@ import {
   advanceRouteProgress,
   buildRoute,
   duplicateRoute,
+  gateSegmentWaypoints,
   itineraryFor,
   nextRouteNavigationAction,
   overrideGameWaypoints,
   parseRouteImport,
   preferenceLabel,
   remainingRouteWormholes,
+  routeDestinationState,
   routeStopSystemIndexes,
   serializeRoutes,
   systemSecurityColor
@@ -431,11 +433,23 @@ function assignedPilotProgress(character) {
   const calculation = assignedCalculation(route, character.id);
   const systems = calculation?.systems || [];
   const specifiedStops = route.mode === 'coverage' ? calculation?.stops || route.stops : route.stops;
-  const stopIndexes = new Set(routeStopSystemIndexes(systems, specifiedStops));
+  const orderedStopIndexes = routeStopSystemIndexes(systems, specifiedStops);
+  const stopIndexes = new Set(orderedStopIndexes);
+  const finalStop = specifiedStops?.at(-1) || null;
+  const dockingStopIndex = finalStop?.kind === 'station' || finalStop?.kind === 'structure'
+    ? orderedStopIndexes.at(-1)
+    : null;
   const wormholesByOrigin = new Map((calculation?.wormholeSteps || []).map((step) => [Number(step.fromIndex), step]));
   const annotateSystem = (routeSystem, systemIndex) => {
     const wormhole = wormholesByOrigin.get(systemIndex) || null;
-    return { ...routeSystem, routeIndex: systemIndex, isStop: stopIndexes.has(systemIndex) || Boolean(wormhole), wormhole };
+    return {
+      ...routeSystem,
+      routeIndex: systemIndex,
+      isStop: stopIndexes.has(systemIndex) || Boolean(wormhole),
+      isDockingStop: Number.isInteger(dockingStopIndex) && systemIndex === dockingStopIndex,
+      dockingStop: Number.isInteger(dockingStopIndex) && systemIndex === dockingStopIndex ? finalStop : null,
+      wormhole
+    };
   };
   const progressKey = `${route.id}:${route.lastSentAt || ''}:${calculation?.calculatedAt || ''}`;
   const previous = character.routeProgress?.key === progressKey ? character.routeProgress : null;
@@ -486,11 +500,17 @@ function assignedPilotProgress(character) {
   const navigationError = calculation && hasUnmappedCalculatedConnection(route, calculation)
     ? 'Wormhole instructions are unavailable for this calculation. Reassign the route before continuing.'
     : null;
+  const destinationState = routeDestinationState(route, character, routeProgress);
+  const dockingSystem = destinationState.docking && systems[destinationState.finalSystemIndex]
+    ? annotateSystem(systems[destinationState.finalSystemIndex], destinationState.finalSystemIndex)
+    : null;
   return {
     route,
     calculation,
     jumpsRemaining,
     remainingSystems,
+    dockingSystem,
+    ...destinationState,
     nextAction: calculation && !navigationError ? nextRouteNavigationAction(route, character, routeProgress) : null,
     navigationError,
     progress: routeProgress
@@ -510,8 +530,7 @@ async function advancePilotWaypoint(character, assignment) {
   }
   if (!canSetEsiWaypoint(action.destination)) return { ...character, routeProgress: assignment.progress };
   const previous = assignment.progress;
-  if (assignment.route.overrideGameRouting
-    && Number.isInteger(previous.sentThroughSystemIndex)
+  if (Number.isInteger(previous.sentThroughSystemIndex)
     && previous.sentThroughSystemIndex >= action.systemIndex) {
     return { ...character, routeProgress: previous };
   }
@@ -523,7 +542,7 @@ async function advancePilotWaypoint(character, assignment) {
   const attemptedAt = new Date().toISOString();
   try {
     const delivery = navigationDelivery(assignment.route, assignment.calculation, character, previous);
-    await submitNavigationDelivery(character, delivery, assignment.route.overrideGameRouting || !previous.sentWaypointKey);
+    await submitNavigationDelivery(character, delivery, true);
     return {
       ...character,
       routeProgress: {
@@ -532,9 +551,7 @@ async function advancePilotWaypoint(character, assignment) {
         waypointAttemptKey: action.key,
         waypointAttemptedAt: attemptedAt,
         waypointError: null,
-        sentThroughSystemIndex: assignment.route.overrideGameRouting
-          ? delivery.sentThroughSystemIndex
-          : previous.sentThroughSystemIndex ?? null
+        sentThroughSystemIndex: delivery.sentThroughSystemIndex
       }
     };
   } catch (error) {
@@ -555,15 +572,10 @@ function navigationDelivery(route, calculation, character, progress) {
   const stagedRoute = { ...route, calculations: [calculation] };
   const action = nextRouteNavigationAction(stagedRoute, character, progress);
   if (!action || action.kind !== 'waypoint') return { action, waypoints: [], sentThroughSystemIndex: null };
-  if (!route.overrideGameRouting) {
-    return {
-      action,
-      waypoints: canSetEsiWaypoint(action.destination) ? [action.destination] : [],
-      sentThroughSystemIndex: null
-    };
-  }
-
-  let waypoints = overrideGameWaypoints(stagedRoute, character.id, progress).filter(canSetEsiWaypoint);
+  let waypoints = (route.overrideGameRouting
+    ? overrideGameWaypoints(stagedRoute, character.id, progress)
+    : gateSegmentWaypoints(stagedRoute, character, progress))
+    .filter(canSetEsiWaypoint);
   if (!waypoints.length && canSetEsiWaypoint(action.destination)) {
     waypoints = [{ ...action.destination, systemIndex: action.systemIndex }];
   }
@@ -588,11 +600,13 @@ function jumpMarkerMarkup(routeSystem) {
   const system = state.graph.get(routeSystem.id);
   const security = Number(system?.security);
   const securityLabel = Number.isFinite(security) ? security.toFixed(1) : 'unknown security';
-  const stopLabel = routeSystem.wormhole
+  const stopLabel = routeSystem.isDockingStop
+    ? ` · ${routeSystem.dockingStop?.kind || 'docking'} destination`
+    : routeSystem.wormhole
     ? ` · wormhole ${routeSystem.wormhole.signatureId} → ${routeSystem.wormhole.to.name}`
     : routeSystem.isStop ? ' · route stop' : '';
   const title = `${system?.name || routeSystem.name || `System ${routeSystem.id}`} · ${securityLabel}${stopLabel}`;
-  const markerClass = routeSystem.isStop ? 'is-stop' : 'is-transit';
+  const markerClass = routeSystem.isDockingStop ? 'is-docking' : routeSystem.isStop ? 'is-stop' : 'is-transit';
   const color = systemSecurityColor(security);
   return `<span class="jump-marker ${markerClass}" style="--jump-color:${color}" title="${escapeHtml(title)}" aria-hidden="true"></span>`;
 }
@@ -649,7 +663,12 @@ function routeProgressTimelineMarkup(assignment, character) {
     parts.push(wormholeInstructionMarkup(wormhole, assignment));
   };
 
-  assignment.remainingSystems.forEach((routeSystem) => {
+  const timelineSystems = assignment.remainingSystems.length
+    ? assignment.remainingSystems
+    : assignment.dockingSystem
+      ? [assignment.dockingSystem]
+      : [];
+  timelineSystems.forEach((routeSystem) => {
     const routeIndex = Number.isInteger(routeSystem.routeIndex) ? routeSystem.routeIndex : null;
     while (wormholeIndex < wormholes.length && routeIndex != null && Number(wormholes[wormholeIndex].fromIndex) < routeIndex) {
       appendWormhole(wormholes[wormholeIndex]);
@@ -696,7 +715,11 @@ function renderAssignedPilots() {
     const online = isCharacterOnline(character);
     const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
     const jumps = assignment.jumpsRemaining == null ? '—' : assignment.jumpsRemaining;
-    const jumpLabel = assignment.jumpsRemaining === 0 ? 'complete' : 'jumps left';
+    const jumpLabel = assignment.docking
+      ? 'docking'
+      : assignment.complete
+        ? 'complete'
+        : 'jumps left';
     return `<article class="pilot-progress-row ${online ? '' : 'is-offline'}">
       <img src="${portraitUrl(character.id, 64)}" alt="">
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
@@ -2100,8 +2123,8 @@ async function setAdHocRoute() {
       let sentWaypointKey = null;
       if (action?.kind === 'waypoint') {
         if (!delivery.waypoints.length) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
-        const destinationLabel = seed.overrideGameRouting
-          ? `${delivery.waypoints.length} calculated waypoint${delivery.waypoints.length === 1 ? '' : 's'}`
+        const destinationLabel = delivery.waypoints.length > 1
+          ? `${delivery.waypoints.length} ${seed.overrideGameRouting ? 'calculated' : 'route'} waypoints`
           : action.destination.name;
         setAdHocStatus(`Setting ${character.name} · ${destinationLabel}…`);
         await waitForPaint();
@@ -2204,8 +2227,8 @@ async function saveRouteAssignments(event) {
       const action = delivery.action;
       if (action?.kind === 'waypoint') {
         if (!delivery.waypoints.length) throw new Error(`${action.destination.name} cannot be submitted as an ESI waypoint.`);
-        const destinationLabel = seed.overrideGameRouting
-          ? `${delivery.waypoints.length} calculated waypoint${delivery.waypoints.length === 1 ? '' : 's'}`
+        const destinationLabel = delivery.waypoints.length > 1
+          ? `${delivery.waypoints.length} ${seed.overrideGameRouting ? 'calculated' : 'route'} waypoints`
           : action.destination.name;
         status.textContent = `Setting ${character.name} · ${destinationLabel}…`;
         await submitNavigationDelivery(character, delivery, true);

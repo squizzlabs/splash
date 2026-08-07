@@ -17,7 +17,7 @@ export const APP_CONFIG = Object.freeze({
     'esi-location.read_location.v1',
     'esi-location.read_online.v1',
     'esi-location.read_ship_type.v1',
-    'esi-universe.read_structures.v1',
+    'esi-structures.read_character.v1',
     'esi-ui.write_waypoint.v1'
   ],
   exportKind: 'just-the-trip-routes',
