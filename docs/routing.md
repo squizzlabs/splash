@@ -50,7 +50,7 @@ Settings contains the default avoid list. It initially contains Jita. New saved 
 
 An avoided system is not used as an intermediate gate-routing system. An explicitly selected origin or destination remains reachable.
 
-Custom connections are manually entered, directional system-to-system edges in the route graph. Add the reverse direction separately when travel works both ways. The app does not discover, identify, or manage jump bridges.
+Custom connections are manually entered, directional system-to-system edges in the route graph. Add the reverse direction separately when travel works both ways.
 
 ## Thera and Turnur
 
