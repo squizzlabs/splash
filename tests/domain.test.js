@@ -475,6 +475,17 @@ test('bundled SDE graph resolves and routes between trade hubs', () => {
   const jitaStation = graph.resolveStop('Jita IV - Moon 4 - Caldari Navy Assembly Plant');
   assert.equal(jitaStation.id, 60003760);
   assert.equal(jitaStation.systemId, jita.id);
+  [
+    ['Jita', 30000142, 60003760],
+    ['Amarr', 30002187, 60008494],
+    ['Rens', 30002510, 60004588],
+    ['Dodixie', 30002659, 60011866],
+    ['Hek', 30002053, 60015140]
+  ].forEach(([query, systemId, stationId]) => {
+    const results = graph.searchStops(query, 10);
+    assert.deepEqual(results.slice(0, 2).map((result) => result.id), [systemId, stationId]);
+    assert.equal(results[1].marketHub, true);
+  });
   const path = graph.astar(jita.id, amarr.id, { preference: 'Shorter' });
   assert.equal(path[0], jita.id);
   assert.equal(path.at(-1), amarr.id);

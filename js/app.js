@@ -933,7 +933,7 @@ function showSystemAutocomplete(input) {
   const areaInput = input.hasAttribute('data-area-autocomplete');
   const stopInput = input.hasAttribute('data-stop-autocomplete');
   menu.innerHTML = matches.map((item, index) => `<button id="system-option-${index}" type="button" role="option" data-index="${index}" aria-selected="${index === 0 ? 'true' : 'false'}" class="${index === 0 ? 'is-active' : ''}">
-    <strong>${escapeHtml(item.name)}</strong>
+    <strong>${escapeHtml(item.name)}${item.marketHub ? ' <em class="market-hub-label">[MARKET HUB]</em>' : ''}</strong>
     <span>${areaInput
       ? `${escapeHtml(item.type)} · ${item.id}`
       : stopInput && item.kind === 'station'

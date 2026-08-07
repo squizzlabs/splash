@@ -533,6 +533,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .system-autocomplete-menu button { display: grid; gap: 2px; width: 100%; padding: 9px 10px; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 7px; text-align: left; }
 .system-autocomplete-menu button:hover, .system-autocomplete-menu button.is-active { background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 32%, transparent); }
 .system-autocomplete-menu strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.system-autocomplete-menu .market-hub-label { color: var(--accent); font-size: 9px; font-style: normal; letter-spacing: .04em; }
 .system-autocomplete-menu span { color: var(--muted); font-size: 9px; }
 .editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; }
 .editor-wide, .editor-name { grid-column: 1 / -1; }

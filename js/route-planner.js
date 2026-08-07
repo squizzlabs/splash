@@ -1,5 +1,14 @@
 import { mergeCalculatedLegs, routeRequestBody } from './domain.js';
 
+const MARKET_HUB_STATION_IDS = Object.freeze([
+  60003760, // Jita
+  60011866, // Dodixie
+  60004588, // Rens
+  60015140, // Hek
+  60008494  // Amarr
+]);
+const MARKET_HUB_STATIONS = new Set(MARKET_HUB_STATION_IDS);
+
 class MinHeap {
   constructor() {
     this.items = [];
@@ -110,7 +119,8 @@ export class UniverseGraph {
         name: String(name),
         kind: 'station',
         systemId: system.id,
-        systemName: system.name
+        systemName: system.name,
+        marketHub: MARKET_HUB_STATIONS.has(Number(id))
       };
       this.stations.set(station.id, station);
       this.stationNames.set(station.name.toLocaleLowerCase(), station.id);
@@ -168,7 +178,20 @@ export class UniverseGraph {
       security: system.security
     }));
     this.stations.forEach(consider);
-    return [...prefixes.sort((left, right) => left.name.localeCompare(right.name)), ...partials].slice(0, limit);
+    const matches = [...prefixes.sort((left, right) => left.name.localeCompare(right.name)), ...partials];
+    if (!numeric) {
+      MARKET_HUB_STATION_IDS.forEach((stationId) => {
+        const station = this.stations.get(stationId);
+        if (!station || !station.name.toLocaleLowerCase().includes(normalized)) return;
+        const systemIndex = matches.findIndex((item) => item.kind === 'system' && item.id === station.systemId);
+        if (systemIndex < 0) return;
+        const existingIndex = matches.findIndex((item) => item.id === station.id);
+        if (existingIndex >= 0) matches.splice(existingIndex, 1);
+        const currentSystemIndex = matches.findIndex((item) => item.kind === 'system' && item.id === station.systemId);
+        matches.splice(currentSystemIndex + 1, 0, station);
+      });
+    }
+    return matches.slice(0, limit);
   }
 
   resolveArea(query, type = 'region') {
