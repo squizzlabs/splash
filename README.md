@@ -103,6 +103,7 @@ See [Deployment and data maintenance](docs/deployment.md) for hosting, callback 
 ```text
 index.html                  Main application
 auth.html                   EVE SSO callback UI
+og-image.png                Open Graph and large-card social preview
 css/app.css                 Application styles
 js/app.js                   UI and workflow orchestration
 js/domain.js                Route and progress domain logic
