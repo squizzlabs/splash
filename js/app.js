@@ -24,6 +24,7 @@ import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnli
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
 const ONLINE_REFRESH_MS = 15_000;
 const LOCATION_REFRESH_MS = 8_000;
+const DEFAULT_AVOID_SYSTEM_IDS = Object.freeze([30000142]);
 if (redirectToLocalhost) {
   window.location.replace(`http://localhost:59832${window.location.pathname}${window.location.search}${window.location.hash}`);
 }
@@ -43,7 +44,8 @@ const state = {
     securityPenalty: 50,
     alwaysUseThera: false,
     alwaysUseTurnur: false,
-    overrideGameRouting: false
+    overrideGameRouting: false,
+    defaultAvoidSystems: [{ id: 30000142, name: 'Jita' }]
   },
   editingRouteId: null,
   editorStops: [],
@@ -189,6 +191,18 @@ function routingPreference() {
 function routingSecurityPenalty() {
   const value = Number(state.settings.securityPenalty);
   return Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 50;
+}
+
+function normalizeDefaultAvoidSystems(values, graph = state.graph) {
+  const systems = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : DEFAULT_AVOID_SYSTEM_IDS) {
+    const system = graph?.resolve(value?.id ?? value);
+    if (!system || seen.has(system.id)) continue;
+    seen.add(system.id);
+    systems.push({ id: system.id, name: system.name });
+  }
+  return systems;
 }
 
 function alwaysWormholeHubs() {
@@ -346,6 +360,9 @@ function soleOnlineCharacterSelection() {
 let toastTimer;
 function toast(message, type = 'success') {
   const element = $('toast');
+  const openDialogs = [...document.querySelectorAll('dialog[open]')];
+  const host = openDialogs.at(-1) || document.body;
+  if (element.parentElement !== host) host.append(element);
   clearTimeout(toastTimer);
   element.textContent = message;
   element.classList.toggle('is-error', type === 'error');
@@ -849,6 +866,12 @@ function renderSettings() {
   $('settings-always-thera').checked = state.settings.alwaysUseThera === true;
   $('settings-always-turnur').checked = state.settings.alwaysUseTurnur === true;
   $('settings-override-game-routing').checked = state.settings.overrideGameRouting === true;
+  $('settings-avoid-list').innerHTML = state.settings.defaultAvoidSystems.length
+    ? state.settings.defaultAvoidSystems.map((system, index) => `<span class="system-chip">
+        ${escapeHtml(system.name)}
+        <button type="button" data-settings-avoid-remove data-index="${index}" aria-label="Remove ${escapeHtml(system.name)}">×</button>
+      </span>`).join('')
+    : '<span class="settings-avoid-empty">No default avoidance systems.</span>';
   if (state.graph) {
     $('settings-sde-build').textContent = state.graph.version || 'Unknown';
     $('settings-sde-date').textContent = formatDate(state.graph.releaseDate);
@@ -938,6 +961,7 @@ function showSystemAutocomplete(input) {
   const menu = $('system-autocomplete-menu');
   const dialog = input.closest('dialog');
   if (dialog && menu.parentElement !== dialog) dialog.append(menu);
+  else if (!dialog && menu.parentElement !== document.body) document.body.append(menu);
   const areaInput = input.hasAttribute('data-area-autocomplete');
   const stopInput = input.hasAttribute('data-stop-autocomplete');
   menu.innerHTML = matches.map((item, index) => `<button id="system-option-${index}" type="button" role="option" data-index="${index}" aria-selected="${index === 0 ? 'true' : 'false'}" class="${index === 0 ? 'is-active' : ''}">
@@ -1225,6 +1249,7 @@ async function generateCoverageStops() {
   const button = $('route-coverage-generate');
   const status = $('route-coverage-status');
   setBusy(button, true, 'Optimizing…');
+  status.classList.remove('is-error');
   try {
     const type = $('route-coverage-type').value;
     const area = state.graph.resolveArea($('route-coverage-area').value, type);
@@ -1255,6 +1280,7 @@ async function generateCoverageStops() {
     $('route-form-status').textContent = '';
   } catch (error) {
     status.textContent = error.message;
+    status.classList.add('is-error');
     toast(error.message, 'error');
   } finally {
     setBusy(button, false);
@@ -1443,8 +1469,10 @@ function handleEditorBuilderAction(action) {
   try {
     action();
     $('route-form-status').textContent = '';
+    $('route-form-status').classList.remove('is-error');
   } catch (error) {
     $('route-form-status').textContent = error.message;
+    $('route-form-status').classList.add('is-error');
     toast(error.message, 'error');
   }
 }
@@ -1456,6 +1484,7 @@ function openRouteEditor(route = null) {
   $('route-editor-title').textContent = route ? 'Edit route' : 'New route';
   $('route-delete').hidden = !route;
   $('route-form-status').textContent = '';
+  $('route-form-status').classList.remove('is-error');
   $('route-mode').value = route?.mode === 'coverage' ? 'coverage' : 'standard';
   $('route-origin-mode').value = route?.originMode || 'character';
   $('route-name').value = route?.name || '';
@@ -1468,7 +1497,8 @@ function openRouteEditor(route = null) {
     ? `${route.stops?.length || 0} systems loaded from ${route.coverageArea.name}.`
     : 'Choose an area to generate an optimized coverage route.';
   state.editorStops = (route?.stops || []).map((stop) => ({ ...stop }));
-  state.editorAvoidSystems = (route?.avoidSystems || []).map((system) => ({ ...system }));
+  state.editorAvoidSystems = (route ? route.avoidSystems || [] : state.settings.defaultAvoidSystems)
+    .map((system) => ({ ...system }));
   state.editorConnections = (route?.connections || []).map((connection) => ({ from: { ...connection.from }, to: { ...connection.to } }));
   const wormholeHubs = new Set(route ? normalizeWormholeHubs(route.wormholeHubs) : alwaysWormholeHubs());
   $('route-wormhole-thera').checked = wormholeHubs.has('thera');
@@ -1594,6 +1624,7 @@ async function saveRoute(event) {
   const status = $('route-form-status');
   const previous = state.routes.find((route) => route.id === state.editingRouteId) || null;
   setBusy(button, true, 'Calculating…');
+  status.classList.remove('is-error');
   status.textContent = 'Resolving systems and calculating A* paths…';
   try {
     flushEditorSystemInputs();
@@ -1689,6 +1720,7 @@ async function saveRoute(event) {
   } catch (error) {
     console.error(error);
     status.textContent = error.message;
+    status.classList.add('is-error');
     toast(error.message, 'error');
   } finally {
     setBusy(button, false);
@@ -1908,7 +1940,7 @@ function openAdHocRouteDialog() {
   hideSystemAutocomplete();
   $('ad-hoc-route-form').reset();
   state.adHocCharacterIds = soleOnlineCharacterSelection();
-  state.adHocAvoidSystems = [];
+  state.adHocAvoidSystems = state.settings.defaultAvoidSystems.map((system) => ({ ...system }));
   state.adHocConnections = [];
   state.adHocWormholeHubs = new Set(alwaysWormholeHubs());
   state.settingAdHocRoute = false;
@@ -2506,6 +2538,35 @@ async function updateSetting(key, value) {
   await store.setSetting(key, value);
 }
 
+async function setDefaultAvoidSystems(systems) {
+  const normalized = normalizeDefaultAvoidSystems(systems);
+  state.settings = { ...state.settings, defaultAvoidSystems: normalized };
+  await store.setSetting('defaultAvoidSystems', normalized.map((system) => system.id));
+  renderSettings();
+}
+
+async function addDefaultAvoidSystem() {
+  const input = $('settings-avoid-input');
+  const query = input.value.trim();
+  if (!query) return false;
+  const system = resolveSystem(query, 'Avoid system');
+  if (state.settings.defaultAvoidSystems.some((item) => item.id === system.id)) {
+    throw new Error(`${system.name} is already in the default avoid list.`);
+  }
+  await setDefaultAvoidSystems([...state.settings.defaultAvoidSystems, system]);
+  input.value = '';
+  input.focus();
+  return true;
+}
+
+async function handleDefaultAvoidAction(action) {
+  try {
+    await action();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
 async function updateRouteBoardSetting(control) {
   renderRoutes();
   await store.setSetting(control.id, control.value);
@@ -2613,14 +2674,17 @@ function bindEvents() {
     $('route-coverage-area').value = '';
     $('route-coverage-area').placeholder = `Search ${$('route-coverage-type').value}s`;
     $('route-coverage-status').textContent = 'Choose an area to generate an optimized coverage route.';
+    $('route-coverage-status').classList.remove('is-error');
   });
   $('route-coverage-generate').addEventListener('click', generateCoverageStops);
   $('route-add-current-location').addEventListener('click', async () => {
     try {
       await addCurrentLocationsToRoute();
       $('route-form-status').textContent = '';
+      $('route-form-status').classList.remove('is-error');
     } catch (error) {
       $('route-form-status').textContent = error.message;
+      $('route-form-status').classList.add('is-error');
       toast(error.message, 'error');
     }
   });
@@ -2934,6 +2998,21 @@ function bindEvents() {
       toast(error.message, 'error');
     }
   });
+  $('settings-avoid-add').addEventListener('click', () => handleDefaultAvoidAction(addDefaultAvoidSystem));
+  $('settings-avoid-input').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    handleDefaultAvoidAction(addDefaultAvoidSystem);
+  });
+  $('settings-avoid-input').addEventListener('change', () => {
+    if (state.graph.resolve($('settings-avoid-input').value)) handleDefaultAvoidAction(addDefaultAvoidSystem);
+  });
+  $('settings-avoid-list').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-settings-avoid-remove]');
+    if (!button) return;
+    const systems = state.settings.defaultAvoidSystems.filter((_, index) => index !== Number(button.dataset.index));
+    handleDefaultAvoidAction(() => setDefaultAvoidSystems(systems));
+  });
   $('erase-data').addEventListener('click', eraseAllData);
   window.addEventListener('storage', async () => {
     state.routes = await store.getAll('routes');
@@ -2956,6 +3035,7 @@ async function initialize() {
       alwaysUseThera,
       alwaysUseTurnur,
       overrideGameRouting,
+      defaultAvoidSystemIds,
       routeSearch,
       routeStatus,
       routeSort,
@@ -2971,6 +3051,7 @@ async function initialize() {
       store.getSetting('alwaysUseThera', false),
       store.getSetting('alwaysUseTurnur', false),
       store.getSetting('overrideGameRouting', false),
+      store.getSetting('defaultAvoidSystems', DEFAULT_AVOID_SYSTEM_IDS),
       store.getSetting('route-search', ''),
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
@@ -2986,7 +3067,8 @@ async function initialize() {
       securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
       alwaysUseThera: alwaysUseThera === true,
       alwaysUseTurnur: alwaysUseTurnur === true,
-      overrideGameRouting: overrideGameRouting === true
+      overrideGameRouting: overrideGameRouting === true,
+      defaultAvoidSystems: normalizeDefaultAvoidSystems(defaultAvoidSystemIds, graph)
     };
     $('route-search').value = typeof routeSearch === 'string' ? routeSearch : '';
     $('route-status-filter').value = ['all', 'ready', 'draft', 'archived'].includes(routeStatus) ? routeStatus : 'all';

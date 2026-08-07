@@ -425,6 +425,12 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .settings-preference-fieldset label > span { padding: 10px; }
 .settings-routing-secondary { display: grid; gap: 13px; }
 .settings-routing-secondary > .field { margin: 0; }
+.settings-avoid-builder { display: grid; gap: 7px; min-width: 0; }
+.settings-avoid-builder .builder-heading > span, .settings-avoid-builder .system-chip { color: var(--text); }
+.settings-avoid-builder input::placeholder { color: var(--muted-strong); opacity: 1; }
+.settings-avoid-builder .system-chip button { color: var(--text); }
+.settings-avoid-builder .system-add-row input, .settings-avoid-builder .system-add-row .button { min-height: var(--field-control-height); }
+.settings-avoid-empty { align-self: center; color: var(--muted); font-size: 10px; }
 .settings-shortcut-options { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .settings-shortcut-options legend { grid-column: 1 / -1; margin-bottom: 1px; }
 .settings-check-option { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: var(--control-radius); cursor: pointer; }
@@ -521,6 +527,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .modal-footer { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 9px; padding: 15px 24px; border-top: 1px solid var(--line-soft); background: var(--panel); }
 .modal-status { margin: 0 auto 0 0; color: var(--muted); font-size: 11px; }
 .modal-status.is-error { color: var(--danger); }
+#route-coverage-status.is-error { color: var(--danger); font-weight: 700; }
 .route-assignment .modal-status { flex: 1 1 280px; line-height: 1.35; }
 .route-assignment .modal-footer { flex-wrap: wrap; }
 .route-editor { overflow: visible; }
@@ -640,6 +647,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .confirm-dialog .modal-body p { margin: 0; color: var(--muted-strong); }
 
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 50; max-width: min(390px, calc(100vw - 48px)); padding: 13px 16px; color: var(--text); background: var(--panel-strong); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 9px; box-shadow: var(--shadow); font-size: 12px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s, transform .2s; }
+.modal > .toast { position: absolute; right: 16px; bottom: 70px; max-width: min(390px, calc(100% - 32px)); }
 .toast.is-visible { opacity: 1; transform: none; }
 .toast.is-error { border-left-color: var(--danger); }
 

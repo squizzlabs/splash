@@ -180,6 +180,17 @@
                   <span>Security strictness <output id="settings-security-penalty-output">50</output></span>
                   <input id="settings-security-penalty" type="range" min="0" max="100" value="50">
                 </label>
+                <div class="settings-avoid-builder">
+                  <div class="builder-heading">
+                    <span>Systems to avoid</span>
+                    <small>Selected by default in route planners</small>
+                  </div>
+                  <div class="system-add-row">
+                    <input id="settings-avoid-input" type="text" data-system-autocomplete autocomplete="off" aria-autocomplete="list" aria-controls="system-autocomplete-menu" placeholder="Search for a solar system">
+                    <button id="settings-avoid-add" class="button button-ghost" type="button">Avoid system</button>
+                  </div>
+                  <div id="settings-avoid-list" class="system-chip-list" aria-live="polite"></div>
+                </div>
                 <fieldset class="settings-shortcut-options">
                   <legend>Wormhole shortcuts</legend>
                   <label class="settings-check-option">
