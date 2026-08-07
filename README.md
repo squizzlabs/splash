@@ -1,106 +1,123 @@
 # Just The Trip
 
-Just The Trip is a static, browser-only EVE Online route planner. It keeps routes, settings, character tokens, and last-known locations in the browser's IndexedDB—there is no application server or shared database.
+> We do the navigating. You do the exploding.
 
-## Features
+Just The Trip is a static, browser-only route planner for EVE Online. It calculates routes locally from a bundled EVE universe graph, connects multiple characters through EVE SSO, sends routes through ESI, and tracks each online pilot’s progress from live location data.
 
-- Authorize multiple EVE characters with SSO Authorization Code + PKCE.
-- Check each character's online state through ESI and only request live services for online pilots.
-- Read each online character's current solar system and active ship through ESI.
-- Create routes from a fixed system or each assigned character's live location.
-- Set an immediate, per-pilot “Take me to…” route with destination autocomplete and the full routing options, without creating a saved/exported route or requiring a separate assignment step.
-- Start new routes from the selected online character's live location by default.
-- Add solar systems or NPC stations as ordered stops, or insert a selected pilot's exact live station/structure location; station and structure endpoints remain in a docking state until ESI reports the pilot docked at that exact destination.
-- Calculate shortest, safer, and less-secure routes in-browser with A*.
-- Generate complete region or constellation coverage routes from the bundled SDE, with a fixed, live, or automatically optimized starting system.
-- Optionally include completed, unexpired public Thera and Turnur wormhole connections in A* route calculations, with persistent always-use defaults.
-- Create and edit routes without assigning characters, then staff each route from its flight-board action.
-- Assign one saved route to multiple characters; every selected pilot receives the complete route.
-- Stage reachable ESI waypoints for every assigned character and advance wormhole-separated segments from live location updates.
-- Optionally override EVE's route choice by submitting every calculated system as an ordered waypoint, with an off-by-default setting and per-route controls.
-- Create, inspect, update, duplicate, archive, and delete routes.
-- Avoid systems and add custom one-way connections such as jump bridges.
-- Import and export portable route JSON without exposing character tokens.
-- Follow dark, light, or system appearance settings, with compact or expanded route-progress defaults.
+Routes, settings, character authorizations, and last-known locations are stored in the browser’s IndexedDB. The app has no application server or shared database.
 
-## EVE SSO setup
+## What it does
 
-Create an application in the [EVE Developers portal](https://developers.eveonline.com/applications) using the Authorization Code flow with PKCE. Enable these scopes:
+- Connects multiple EVE characters with Authorization Code + PKCE.
+- Checks character online status every 15 seconds.
+- Polls locations and ships for online characters every 8 seconds.
+- Calculates Shortest, Safest, and Less secure routes locally with A*.
+- Creates saved routes without requiring pilot assignments.
+- Sends one saved route to any number of online pilots; each pilot receives the complete route.
+- Sets direct, unsaved routes for one or more online pilots.
+- Supports ordered solar-system, NPC-station, and known structure stops.
+- Tracks station and structure destinations through docking completion.
+- Generates region and constellation coverage routes.
+- Supports draggable ordered stops, autocomplete, system avoidance, and custom one-way connections.
+- Uses Jita as the initial default system to avoid; the default list is editable in Settings.
+- Uses active public Thera and Turnur connections from EVE-Scout when selected.
+- Stages route delivery around wormhole traversals and displays the signature to use.
+- Can submit every calculated gate system to override EVE’s own route choice.
+- Imports and exports route plans without including character tokens.
 
-- `publicData`
-- `esi-location.read_location.v1`
-- `esi-location.read_online.v1`
-- `esi-location.read_ship_type.v1`
-- `esi-universe.read_structures.v1`
-- `esi-ui.write_waypoint.v1`
-
-Characters authorized before the required location, online, ship, or structure scopes were added must be reconnected once. The app marks unavailable protected services instead of treating incomplete authorization as valid live data.
-
-Client IDs and callback URLs are deployment configuration and are never exposed as user settings. A client secret is neither requested nor stored.
-
-The registered callbacks are:
-
-- Local: `http://localhost:59832/callback`
-- Production: `https://jtt.zzeve.com/callback`
-
-The hostname-specific public client IDs are configured only in `js/config.js`.
+See [Routing and route delivery](docs/routing.md) for the complete routing model.
 
 ## Run locally
+
+Requirements:
+
+- Python 3 for the local static server
+- Node.js 22 or newer for tests and SDE tooling
+
+Start the app:
 
 ```bash
 python3 serve.py
 ```
 
-Then open <http://localhost:59832>. Static hosting such as GitHub Pages or Netlify works without a build step.
+Open <http://localhost:59832>.
 
-## Universe graph updates
+Run the test suite:
 
-The app ships `data/universe.json`, a compact graph generated from CCP's solar-system, stargate, region, constellation, and NPC-station JSONL files. It contains routing topology, area membership, and searchable station stops.
+```bash
+npm test
+```
 
-`.github/workflows/update-sde.yml` checks CCP's `latest.jsonl` every day after downtime. When the build number changes, it downloads the current SDE, runs `scripts/build-sde.mjs`, runs the tests, and commits the updated graph. This adapts the release-check/download pattern used by zKillboard's `cron/sde/update_sde_jsonl.sh` for a static GitHub-hosted app.
+## EVE application configuration
 
-To check for and install an SDE update locally:
+The EVE application uses the Authorization Code flow with PKCE and these scopes:
+
+- `esi-location.read_location.v1`
+- `esi-location.read_online.v1`
+- `esi-location.read_ship_type.v1`
+- `esi-structures.read_character.v1`
+- `esi-ui.write_waypoint.v1`
+
+Registered callback URLs:
+
+- Local: `http://localhost:59832/callback`
+- Production: `https://jtt.zzeve.com/callback`
+
+Public client IDs, callback URLs, ESI endpoints, and attribution are deployment configuration in [`js/config.js`](js/config.js). They are not user settings. The app does not use or store a client secret.
+
+Every ESI request identifies the app with:
+
+```text
+Just The Trip / <deployment URL> / Squizz Caphinator
+```
+
+The local deployment uses `http://localhost:59832`; the production deployment uses `https://jtt.zzeve.com`.
+
+## Universe data
+
+The app ships [`data/universe.json`](data/universe.json), a compact browser graph built from CCP’s JSONL SDE. It contains:
+
+- Solar systems and stargate adjacency
+- Coordinates and security status
+- Regions and constellations
+- NPC station stops used by autocomplete
+
+Update the installed SDE locally:
 
 ```bash
 npm run update-sde
 ```
 
-The updater exits without downloading the archive when the installed build is current. To download and rebuild the current release anyway:
+Force a fresh download and rebuild:
 
 ```bash
 npm run update-sde -- --force
 ```
 
-The replacement graph is built in a temporary directory and must pass a real A* route smoke test before it replaces `data/universe.json`.
+The updater builds into a temporary directory, validates the graph, runs the tests, and replaces the installed data only after validation succeeds. The GitHub Action performs the same update automatically when CCP publishes a new build.
 
-To rebuild directly from JSONL files you already have:
+See [Deployment and data maintenance](docs/deployment.md) for hosting, callback routing, SDE build commands, storage, and operational details.
 
-```bash
-node scripts/build-sde.mjs \
-  --systems /path/to/mapSolarSystems.jsonl \
-  --stargates /path/to/mapStargates.jsonl \
-  --regions /path/to/mapRegions.jsonl \
-  --constellations /path/to/mapConstellations.jsonl \
-  --stations /path/to/npcStations.jsonl \
-  --moons /path/to/mapMoons.jsonl \
-  --corporations /path/to/npcCorporations.jsonl \
-  --station-operations /path/to/stationOperations.jsonl \
-  --latest /path/to/latest.jsonl \
-  --out data/universe.json \
-  --version-out data/sde-version.json
+## Project layout
+
+```text
+index.html                  Main application
+auth.html                   EVE SSO callback UI
+css/app.css                 Application styles
+js/app.js                   UI and workflow orchestration
+js/domain.js                Route and progress domain logic
+js/route-planner.js         Universe graph and A* routing
+js/esi.js                   EVE SSO and ESI client
+js/eve-scout.js             Thera and Turnur connection client
+js/presence.js              Online, location, and ship synchronization
+js/db.js                    IndexedDB storage
+scripts/                    SDE build, validation, and update tools
+tests/                      Node test suite
 ```
 
-## Live wormhole shortcuts
+## Privacy
 
-Thera, Turnur, or both can be selected while editing a route, creating a direct route, or immediately before assigning it to pilots. Settings supply the initial selections, and each route operation can override them. Just The Trip reads completed, unexpired public connections from the [EVE-Scout API](https://api.eve-scout.com/ui/) and caches the result in memory for five minutes. The most recently assigned choice is saved on the route and persists with route exports; live signatures do not.
-
-The default route preference is stored in Settings and defaults to Safest when it has never been set. The default avoid list also lives in Routing settings, starts with Jita, and is copied into new saved and direct route planners. Route creation, direct routes, and assignment retain their own Shortest, Safest, and Less secure controls, initialized from that default or the saved route. **Override Game Routing** is also a setting-backed, per-operation option and defaults to off. When enabled, Just The Trip clears the pilot's existing in-game route and appends every calculated solar system in order, including a station or structure stop after its system, so EVE follows the app's exact gate path.
-
-EVE autopilot cannot perform a wormhole traversal. Just The Trip therefore stages route delivery only at wormhole boundaries: it sends every remaining explicit stop in the current gate-reachable segment, waits for location polling to confirm the pilot crossed the hole, and then sends the next segment. Game-routing override sends every calculated system in the segment instead. At a wormhole system, Route Progress shows the exact signature to warp to and tracks the pilot through the destination system without submitting Thera or another wormhole-only system to ESI. Wormhole instructions, signatures, and expiration times are retained with the calculated pilot route. The planner currently does not filter connections by the active ship's mass limit.
-
-## Privacy and backups
-
-Route exports do not include access tokens, refresh tokens, or character records. Removing a character deletes its tokens and assignments from this browser. **Erase all local data** deletes the entire IndexedDB database.
+Character tokens remain in this browser and are sent only to EVE SSO and ESI as required. Route exports exclude tokens and character records. Removing a character deletes its authorization and assignments from the browser. **Erase all local data** removes the app’s IndexedDB database.
 
 ## License
 
