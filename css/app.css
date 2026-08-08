@@ -320,7 +320,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-identity, .pilot-progress-location, .pilot-progress-jumps { min-width: 0; }
 .pilot-progress-identity strong, .pilot-progress-location strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pilot-progress-identity strong { font-size: 13px; }
-.pilot-progress-identity span { display: block; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pilot-progress-identity span { display: block; overflow: hidden; margin-top: 2px; color: var(--accent); font-size: 12px; font-weight: 650; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .pilot-progress-location span, .pilot-progress-jumps span { display: block; color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .pilot-progress-jumps span { color: var(--muted-strong); font-size: 9px; }
 .pilot-progress-jumps.is-complete span { color: var(--success); }

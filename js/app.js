@@ -747,9 +747,10 @@ function renderAssignedPilots() {
           ? 'jump left'
           : 'jumps left';
     const jumpStatusClass = assignment.docking ? 'is-docking' : assignment.complete ? 'is-complete' : '';
+    const routeLabel = assignment.route.name.replace(/^To\s+/i, '→ ');
     return `<article class="pilot-progress-row ${online ? '' : 'is-offline'}">
       <img src="${portraitUrl(character.id, 64)}" alt="">
-      <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
+      <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(routeLabel)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
       <div class="pilot-progress-jumps ${jumpStatusClass}"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
       <button class="pilot-progress-remove" type="button" data-remove-pilot-route="${character.id}" aria-label="Remove ${escapeHtml(character.name)} from route tracking" title="Remove from route tracking; keep the EVE autopilot route">×</button>
