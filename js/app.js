@@ -286,6 +286,7 @@ async function refreshWormholeConnections({ force = false } = {}) {
   state.wormholeLoading = true;
   state.wormholeError = null;
   renderWormholeStatuses();
+  updateAdHocJumpPreview();
   state.wormholePromise = (async () => {
     try {
       const result = await eveScout.connections((systemId) => state.graph?.get(systemId));
@@ -299,6 +300,7 @@ async function refreshWormholeConnections({ force = false } = {}) {
       state.wormholeLoading = false;
       state.wormholePromise = null;
       renderWormholeStatuses();
+      updateAdHocJumpPreview();
     }
   })();
   return state.wormholePromise;
@@ -1882,8 +1884,60 @@ function selectAllRoutePilots(selected) {
 
 function setAdHocStatus(message = '', isError = false) {
   const status = $('ad-hoc-route-status');
-  status.textContent = message;
+  $('ad-hoc-route-status-message').textContent = message;
+  $('ad-hoc-route-jumps').textContent = '';
+  $('ad-hoc-route-jumps').hidden = true;
   status.classList.toggle('is-error', isError);
+}
+
+function adHocJumpPreview() {
+  if (!state.graph || state.adHocCharacterIds.size !== 1) return '';
+  const destination = state.graph.resolveStop($('ad-hoc-destination').value);
+  if (!destination) return '';
+  const [characterId] = state.adHocCharacterIds;
+  const character = state.characters.find((item) => item.id === characterId);
+  const origin = state.graph.resolve(character?.location?.id);
+  if (!origin) return '';
+  const wormholeHubs = selectedAdHocWormholeHubs();
+  if (wormholeHubs.length && state.wormholeLoading) return 'Calculating jumps…';
+  if (wormholeHubs.length && state.wormholeError) return 'Jump count unavailable';
+
+  try {
+    const result = calculateSeedItinerary({
+      mode: 'standard',
+      originMode: 'character',
+      origin: null,
+      stops: [destination],
+      avoidSystems: state.adHocAvoidSystems,
+      connections: state.adHocConnections,
+      wormholeHubs,
+      preference: document.querySelector('input[name="ad-hoc-preference"]:checked')?.value || routingPreference(),
+      securityPenalty: $('ad-hoc-security-penalty').value
+    }, origin, character.id);
+    const jumps = Math.max(0, (result?.systems?.length || 1) - 1);
+    return `${jumps} jump${jumps === 1 ? '' : 's'}`;
+  } catch (_) {
+    return 'No known route';
+  }
+}
+
+function renderAdHocRouteStatus(onlineCharacters = state.characters.filter(isCharacterOnline)) {
+  if (state.settingAdHocRoute) return;
+  const selectedCount = state.adHocCharacterIds.size;
+  setAdHocStatus(selectedCount
+    ? `${selectedCount} online pilot${selectedCount === 1 ? '' : 's'} selected.`
+    : onlineCharacters.length
+      ? 'Choose a destination and one or more online pilots.'
+      : 'No online pilots are available.');
+  updateAdHocJumpPreview();
+}
+
+function updateAdHocJumpPreview() {
+  const previewElement = $('ad-hoc-route-jumps');
+  if (!previewElement || state.settingAdHocRoute || $('ad-hoc-route-status').classList.contains('is-error')) return;
+  const preview = adHocJumpPreview();
+  previewElement.textContent = preview;
+  previewElement.hidden = !preview;
 }
 
 function updateAdHocPreference() {
@@ -1928,13 +1982,8 @@ function renderAdHocRouteDialog() {
   </div>`).join('');
   updateAdHocPreference();
   renderWormholeStatuses();
-  if (!state.settingAdHocRoute && !$('ad-hoc-route-status').textContent.trim()) {
-    setAdHocStatus(selectedCount
-      ? `${selectedCount} online pilot${selectedCount === 1 ? '' : 's'} selected.`
-      : onlineCharacters.length
-        ? 'Choose a destination and one or more online pilots.'
-        : 'No online pilots are available.');
-  }
+  if (!state.settingAdHocRoute && !$('ad-hoc-route-status').textContent.trim()) renderAdHocRouteStatus(onlineCharacters);
+  else updateAdHocJumpPreview();
 }
 
 function openAdHocRouteDialog() {
@@ -2855,6 +2904,11 @@ function bindEvents() {
     setAdHocStatus();
     renderAdHocRouteDialog();
   });
+  ['input', 'change'].forEach((eventName) => $('ad-hoc-destination').addEventListener(eventName, () => {
+    if (state.settingAdHocRoute) return;
+    setAdHocStatus();
+    renderAdHocRouteStatus();
+  }));
   $('ad-hoc-select-all').addEventListener('click', () => selectAllAdHocPilots(true));
   $('ad-hoc-select-none').addEventListener('click', () => selectAllAdHocPilots(false));
   $('ad-hoc-avoid-add').addEventListener('click', () => handleAdHocBuilderAction(addAdHocAvoidSystem));
@@ -2894,8 +2948,16 @@ function bindEvents() {
     setAdHocStatus();
     renderAdHocRouteDialog();
   });
-  document.querySelectorAll('input[name="ad-hoc-preference"]').forEach((input) => input.addEventListener('change', updateAdHocPreference));
-  $('ad-hoc-security-penalty').addEventListener('input', () => { $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value; });
+  document.querySelectorAll('input[name="ad-hoc-preference"]').forEach((input) => input.addEventListener('change', () => {
+    updateAdHocPreference();
+    setAdHocStatus();
+    renderAdHocRouteStatus();
+  }));
+  $('ad-hoc-security-penalty').addEventListener('input', () => {
+    $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value;
+    setAdHocStatus();
+    renderAdHocRouteStatus();
+  });
   $('ad-hoc-route-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = $('ad-hoc-route-submit');

@@ -596,7 +596,8 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .ad-hoc-route-dialog { width: min(820px, calc(100vw - 28px)); overflow: hidden; }
 .ad-hoc-route-dialog .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ad-hoc-route-dialog .modal-footer { flex-wrap: wrap; }
-.ad-hoc-route-dialog .modal-status { flex: 1 1 280px; color: var(--text); line-height: 1.35; }
+.ad-hoc-route-dialog .modal-status { display: flex; align-items: baseline; flex: 1 1 280px; flex-wrap: wrap; gap: 4px 12px; color: var(--text); line-height: 1.35; }
+.ad-hoc-route-dialog .modal-status strong { color: var(--accent); white-space: nowrap; }
 .ad-hoc-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .ad-hoc-destination-field, .ad-hoc-character-picker, .ad-hoc-preference-fieldset, #ad-hoc-security-penalty-field, .ad-hoc-override-option, .ad-hoc-wormholes, .ad-hoc-avoid-builder, .ad-hoc-connection-builder { grid-column: 1 / -1; }
 .ad-hoc-destination-field { margin-top: 0; }
