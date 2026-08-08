@@ -79,6 +79,8 @@ Assigning a saved route to multiple pilots gives every selected pilot the entire
 
 Only online pilots can receive or clear routes. Clear Route submits the pilot’s current known location as the replacement ESI waypoint and removes the app’s tracked assignment after ESI accepts the request.
 
+Removing a pilot from Route Progress only removes the app’s assignment and progress tracking. It does not change that pilot’s in-game EVE autopilot route.
+
 ## Route Progress
 
 Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.

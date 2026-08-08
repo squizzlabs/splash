@@ -306,7 +306,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-list { display: grid; gap: 8px; }
 .pilot-progress-row {
   display: grid;
-  grid-template-columns: 38px minmax(120px, .85fr) minmax(150px, 1.35fr) 66px;
+  grid-template-columns: 38px minmax(120px, .85fr) minmax(150px, 1.35fr) 66px 26px;
   align-items: center;
   gap: 12px;
   min-height: 76px;
@@ -328,6 +328,9 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-location strong { margin-top: 2px; font-size: 12px; }
 .pilot-progress-jumps { text-align: right; }
 .pilot-progress-jumps strong { display: block; font-size: 18px; line-height: 1.1; }
+.pilot-progress-remove { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; font-size: 18px; line-height: 1; }
+.pilot-progress-remove:hover, .pilot-progress-remove:focus-visible { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.pilot-progress-remove:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .pilot-route-timeline { position: relative; display: grid; grid-column: 3 / -1; grid-row: 2; gap: 4px; min-width: 0; margin-top: -3px; }
 .pilot-route-chevron { position: absolute; top: -3px; left: -40px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; color: var(--text); background: transparent; border: 0; border-radius: 4px; }
 .pilot-route-chevron:hover, .pilot-route-chevron:focus-visible { color: var(--accent); background: var(--panel-strong); }
@@ -693,9 +696,10 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
   .route-row { grid-template-columns: 1fr auto; gap: 17px; min-height: 0; padding: 18px; }
   .route-line { grid-column: 1 / -1; grid-row: 2; }
   .route-actions { grid-column: 2; grid-row: 1; }
-  .pilot-progress-row { grid-template-columns: 38px minmax(0, 1fr) 66px; }
+  .pilot-progress-row { grid-template-columns: 38px minmax(0, 1fr) 66px 26px; }
   .pilot-progress-location { grid-column: 2; grid-row: 2; }
   .pilot-progress-jumps { grid-column: 3; grid-row: 1 / span 2; }
+  .pilot-progress-remove { grid-column: 4; grid-row: 1 / span 2; }
   .pilot-route-timeline { grid-column: 2 / -1; grid-row: 3; }
   .pilot-wormhole-stop { grid-template-columns: 12px auto minmax(0, 1fr); }
   .pilot-wormhole-stop small { grid-column: 3; }

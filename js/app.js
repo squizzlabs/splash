@@ -750,6 +750,7 @@ function renderAssignedPilots() {
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(assignment.route.name)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
       <div class="pilot-progress-jumps ${jumpStatusClass}"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
+      <button class="pilot-progress-remove" type="button" data-remove-pilot-route="${character.id}" aria-label="Remove ${escapeHtml(character.name)} from route tracking" title="Remove from route tracking; keep the EVE autopilot route">×</button>
       ${routeProgressTimelineMarkup(assignment, character)}
       ${assignment.progress.waypointError && assignment.progress.waypointAttemptKey === assignment.nextAction?.key
         ? `<div class="pilot-waypoint-error">Could not set next waypoint: ${escapeHtml(assignment.progress.waypointError)}</div>`
@@ -2132,6 +2133,36 @@ async function clearSelectedPilotRoutes() {
   toast(`Cleared ${successful.length} pilot route${successful.length === 1 ? '' : 's'}.`);
 }
 
+async function removePilotFromRoute(characterId) {
+  const character = state.characters.find((item) => item.id === Number(characterId));
+  if (!character || !assignedRouteForCharacter(character)) return;
+  if (!await confirmAction(
+    'Remove this pilot from route tracking?',
+    `${character.name}’s assignment and progress will be removed from Just The Trip. Their EVE autopilot route will stay unchanged.`,
+    'Remove pilot'
+  )) return;
+
+  const changedRoutes = state.routes.filter((route) => (
+    (route.assignedCharacterIds || []).some((assignedId) => Number(assignedId) === character.id)
+  )).map((route) => ({
+    ...route,
+    assignedCharacterIds: route.assignedCharacterIds.filter((assignedId) => Number(assignedId) !== character.id),
+    calculations: ensureReferenceCalculation(route.calculations)
+      .filter((calculation) => Number(calculation.characterId) !== character.id),
+    updatedAt: new Date().toISOString()
+  }));
+  await store.putMany('routes', changedRoutes);
+  const routeChanges = new Map(changedRoutes.map((route) => [route.id, route]));
+  state.routes = state.routes.map((route) => routeChanges.get(route.id) || route);
+
+  const updatedCharacter = { ...character, directRoute: null, routeProgress: null };
+  await store.put('characters', updatedCharacter);
+  state.characters = state.characters.map((item) => item.id === character.id ? updatedCharacter : item);
+  state.progressDisplayOverrides.delete(character.id);
+  renderAll();
+  toast(`${character.name} removed from route tracking. EVE route unchanged.`);
+}
+
 async function setAdHocRoute() {
   flushAdHocInputs();
   const destination = resolveStop($('ad-hoc-destination').value, 'Destination');
@@ -2614,6 +2645,14 @@ function bindEvents() {
     }
   });
   $('assigned-pilots-list').addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-remove-pilot-route]');
+    if (remove) {
+      removePilotFromRoute(remove.dataset.removePilotRoute).catch((error) => {
+        console.error(error);
+        toast(`Could not remove pilot: ${error.message}`, 'error');
+      });
+      return;
+    }
     const toggle = event.target.closest('[data-progress-route-toggle]');
     if (!toggle) return;
     const characterId = Number(toggle.dataset.progressRouteToggle);
