@@ -81,6 +81,8 @@ Only online pilots can receive or clear routes. Clear Route submits the pilot’
 
 Removing a pilot from Route Progress only removes the app’s assignment and progress tracking. It does not change that pilot’s in-game EVE autopilot route.
 
+**Auto-remove complete** applies that same tracking-only removal automatically when a pilot reaches the final system, or docks at the final station or structure. Offline pilots remain visible in Route Progress while they still have an assignment.
+
 ## Route Progress
 
 Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.

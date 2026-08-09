@@ -107,14 +107,14 @@
               </div>
             </div>
             <div class="pilot-column-tools">
-              <label class="pilot-filter-toggle">
-                <input id="show-offline-pilots" type="checkbox" checked>
+              <label class="pilot-filter-toggle" title="Remove completed pilot tracking without changing the EVE autopilot route">
+                <input id="auto-remove-complete" type="checkbox">
                 <span class="toggle-slider" aria-hidden="true"></span>
-                <span>Show offline</span>
+                <span>Auto-remove complete</span>
               </label>
             </div>
             <div id="assigned-pilots-list" class="pilot-progress-list" aria-live="polite"></div>
-            <p class="progress-note">Gate-reachable stops are sent together; exact routing sends each calculated system. Wormhole segments unlock after crossing. Station and structure destinations complete only after docking. After reopening, progress catches up from the pilot’s current system when possible.</p>
+            <p class="progress-note">Gate-reachable stops are sent together; exact routing sends each calculated system. Wormhole segments unlock after crossing. Station and structure destinations complete only after docking. Auto-remove drops Splash tracking only; the EVE autopilot route is unchanged.</p>
           </section>
         </div>
       </section>

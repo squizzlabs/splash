@@ -41,6 +41,7 @@ const state = {
   settings: {
     theme: 'system',
     routeProgressDisplay: 'compact',
+    autoRemoveComplete: false,
     routePreference: 'Safer',
     securityPenalty: 50,
     alwaysUseThera: false,
@@ -75,6 +76,7 @@ const state = {
   wormholeError: null,
   wormholeLoading: false,
   wormholePromise: null,
+  autoRemovePromise: null,
   progressDisplayOverrides: new Map(),
   sloganTimer: null
 };
@@ -734,14 +736,10 @@ function renderAssignedPilots() {
     .map((character) => ({ character, assignment: assignedPilotProgress(character) }))
     .filter(({ assignment }) => assignment)
     .sort((left, right) => left.character.name.localeCompare(right.character.name));
-  const showOffline = $('show-offline-pilots').checked;
-  const assignments = allAssignments.filter(({ character }) => showOffline || isCharacterOnline(character));
+  const assignments = allAssignments;
 
   if (!assignments.length) {
-    const message = allAssignments.length
-      ? 'No online pilots have an assigned route.'
-      : 'No pilots have a known assigned route.';
-    $('assigned-pilots-list').innerHTML = `<div class="pilot-progress-empty">${escapeHtml(message)}</div>`;
+    $('assigned-pilots-list').innerHTML = '<div class="pilot-progress-empty">No pilots have a known assigned route.</div>';
     return;
   }
 
@@ -1183,6 +1181,7 @@ async function refreshOnlineLocations() {
   state.presenceSyncing = true;
   try {
     await Promise.allSettled(onlineCharacters.map((character) => refreshCharacterLocation(character)));
+    await autoRemoveCompletedPilots();
     await recalculateAssignedRoutes();
     renderPilotData();
   } finally {
@@ -1200,6 +1199,7 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
   setBusy(button, true, 'Syncing…');
   try {
     const results = await Promise.allSettled(state.characters.map((character) => refreshCharacterPresence(character, true)));
+    await autoRemoveCompletedPilots();
     await recalculateAssignedRoutes();
     renderHeader();
     renderRoutes();
@@ -2225,6 +2225,59 @@ async function clearSelectedPilotRoutes() {
   toast(`Cleared ${successful.length} pilot route${successful.length === 1 ? '' : 's'}.`);
 }
 
+async function removePilotsFromRouteTracking(characterIds) {
+  const ids = new Set([...characterIds].map(Number).filter((id) => Number.isSafeInteger(id) && id > 0));
+  const characters = state.characters.filter((character) => ids.has(character.id));
+  if (!characters.length) return [];
+
+  const now = new Date().toISOString();
+  const changedRoutes = state.routes.filter((route) => (
+    (route.assignedCharacterIds || []).some((assignedId) => ids.has(Number(assignedId)))
+  )).map((route) => ({
+    ...route,
+    assignedCharacterIds: route.assignedCharacterIds.filter((assignedId) => !ids.has(Number(assignedId))),
+    calculations: ensureReferenceCalculation(route.calculations)
+      .filter((calculation) => !ids.has(Number(calculation.characterId))),
+    updatedAt: now
+  }));
+  await store.putMany('routes', changedRoutes);
+  const routeChanges = new Map(changedRoutes.map((route) => [route.id, route]));
+  state.routes = state.routes.map((route) => routeChanges.get(route.id) || route);
+
+  const changedCharacters = characters.map((character) => ({
+    ...character,
+    directRoute: null,
+    routeProgress: null
+  }));
+  await store.putMany('characters', changedCharacters);
+  const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+  state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
+  ids.forEach((characterId) => state.progressDisplayOverrides.delete(characterId));
+  return characters;
+}
+
+async function autoRemoveCompletedPilots({ notify = true } = {}) {
+  if (!state.settings.autoRemoveComplete) return [];
+  if (state.autoRemovePromise) return state.autoRemovePromise;
+  state.autoRemovePromise = (async () => {
+    const completed = state.characters.filter((character) => assignedPilotProgress(character)?.complete);
+    if (!completed.length) return [];
+    await removePilotsFromRouteTracking(completed.map((character) => character.id));
+    if (notify) {
+      const label = completed.length === 1
+        ? `${completed[0].name} completed their route and was removed from tracking.`
+        : `${completed.length} pilots completed their routes and were removed from tracking.`;
+      toast(`${label} EVE routes unchanged.`);
+    }
+    return completed;
+  })();
+  try {
+    return await state.autoRemovePromise;
+  } finally {
+    state.autoRemovePromise = null;
+  }
+}
+
 async function removePilotFromRoute(characterId) {
   const character = state.characters.find((item) => item.id === Number(characterId));
   if (!character || !assignedRouteForCharacter(character)) return;
@@ -2234,23 +2287,7 @@ async function removePilotFromRoute(characterId) {
     'Remove pilot'
   )) return;
 
-  const changedRoutes = state.routes.filter((route) => (
-    (route.assignedCharacterIds || []).some((assignedId) => Number(assignedId) === character.id)
-  )).map((route) => ({
-    ...route,
-    assignedCharacterIds: route.assignedCharacterIds.filter((assignedId) => Number(assignedId) !== character.id),
-    calculations: ensureReferenceCalculation(route.calculations)
-      .filter((calculation) => Number(calculation.characterId) !== character.id),
-    updatedAt: new Date().toISOString()
-  }));
-  await store.putMany('routes', changedRoutes);
-  const routeChanges = new Map(changedRoutes.map((route) => [route.id, route]));
-  state.routes = state.routes.map((route) => routeChanges.get(route.id) || route);
-
-  const updatedCharacter = { ...character, directRoute: null, routeProgress: null };
-  await store.put('characters', updatedCharacter);
-  state.characters = state.characters.map((item) => item.id === character.id ? updatedCharacter : item);
-  state.progressDisplayOverrides.delete(character.id);
+  await removePilotsFromRouteTracking([character.id]);
   renderAll();
   toast(`${character.name} removed from route tracking. EVE route unchanged.`);
 }
@@ -2355,6 +2392,7 @@ async function setAdHocRoute() {
     await store.putMany('characters', changedCharacters);
     const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
+    await autoRemoveCompletedPilots();
     renderAll();
     toast(`Route to ${destination.name} set for ${successful.length} pilot${successful.length === 1 ? '' : 's'}.`);
   }
@@ -2455,6 +2493,7 @@ async function saveRouteAssignments(event) {
     await store.putMany('characters', changedCharacters);
     const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
+    await autoRemoveCompletedPilots();
   }
 
   renderHeader();
@@ -2562,11 +2601,18 @@ async function sendRouteToAutopilot(route) {
     await store.putMany('characters', changedCharacters);
     const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
+    await autoRemoveCompletedPilots();
     renderRoutes();
   }
   setBusy(button, false);
-  const remainingOnline = selectedCharacters(route).filter(isCharacterOnline).length;
-  button.textContent = remainingOnline ? `Send to ${remainingOnline} online` : 'Assigned pilots offline';
+  const currentRoute = state.routes.find((candidate) => candidate.id === route.id) || route;
+  const remainingAssigned = selectedCharacters(currentRoute);
+  const remainingOnline = remainingAssigned.filter(isCharacterOnline).length;
+  button.textContent = remainingOnline
+    ? `Send to ${remainingOnline} online`
+    : remainingAssigned.length
+      ? 'Assigned pilots offline'
+      : 'Assign a pilot first';
   button.disabled = !remainingOnline;
   if (failed.length) throw new Error(`Sent to ${successful.length}; failed for ${failed.map((result) => result.character.name).join(', ')}: ${failed[0].error.message}`);
   const skipped = assigned.length - characters.length;
@@ -2728,12 +2774,14 @@ function bindEvents() {
       }
     });
   });
-  $('show-offline-pilots').addEventListener('change', async () => {
+  $('auto-remove-complete').addEventListener('change', async () => {
     try {
-      renderAssignedPilots();
-      await store.setSetting('show-offline-pilots', $('show-offline-pilots').checked);
+      state.settings = { ...state.settings, autoRemoveComplete: $('auto-remove-complete').checked };
+      await store.setSetting('auto-remove-complete', state.settings.autoRemoveComplete);
+      await autoRemoveCompletedPilots();
+      renderAll();
     } catch (error) {
-      toast(`Could not remember the pilot filter: ${error.message}`, 'error');
+      toast(`Could not update automatic route removal: ${error.message}`, 'error');
     }
   });
   $('assigned-pilots-list').addEventListener('click', (event) => {
@@ -3183,7 +3231,7 @@ async function initialize() {
       routeSearch,
       routeStatus,
       routeSort,
-      showOfflinePilots
+      autoRemoveComplete
     ] = await Promise.all([
       UniverseGraph.load('./data/universe.json'),
       store.getAll('routes'),
@@ -3199,7 +3247,7 @@ async function initialize() {
       store.getSetting('route-search', ''),
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
-      store.getSetting('show-offline-pilots', true)
+      store.getSetting('auto-remove-complete', false)
     ]);
     state.graph = graph;
     state.routes = await repairEncodedRouteText(routes);
@@ -3207,6 +3255,7 @@ async function initialize() {
     state.settings = {
       theme,
       routeProgressDisplay: routeProgressDisplay === 'expanded' ? 'expanded' : 'compact',
+      autoRemoveComplete: autoRemoveComplete === true,
       routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
       securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
       alwaysUseThera: alwaysUseThera === true,
@@ -3217,10 +3266,11 @@ async function initialize() {
     $('route-search').value = typeof routeSearch === 'string' ? routeSearch : '';
     $('route-status-filter').value = ['all', 'ready', 'draft', 'archived'].includes(routeStatus) ? routeStatus : 'all';
     $('route-sort').value = ['updated', 'name', 'jumps'].includes(routeSort) ? routeSort : 'updated';
-    $('show-offline-pilots').checked = showOfflinePilots !== false;
+    $('auto-remove-complete').checked = state.settings.autoRemoveComplete;
     applyAppearance();
     prepareSystemAutocomplete();
     bindEvents();
+    await autoRemoveCompletedPilots({ notify: false });
     renderAll();
     const hasWormholeRoute = alwaysWormholeHubs().length
       || state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)

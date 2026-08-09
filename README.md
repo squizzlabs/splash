@@ -17,6 +17,7 @@ Routes, settings, character authorizations, and last-known locations are stored 
 - Sets direct, unsaved routes for one or more online pilots.
 - Supports ordered solar-system, NPC-station, and known structure stops.
 - Tracks station and structure destinations through docking completion.
+- Can automatically remove completed pilots from local tracking without changing their EVE autopilot route.
 - Generates region and constellation coverage routes.
 - Supports draggable ordered stops, autocomplete, system avoidance, and custom one-way connections.
 - Uses Jita as the initial default system to avoid; the default list is editable in Settings.
