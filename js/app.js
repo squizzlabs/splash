@@ -1920,14 +1920,28 @@ function setAdHocStatus(message = '', isError = false) {
   status.classList.toggle('is-error', isError);
 }
 
+function adHocSelectedOrigin() {
+  const characters = state.characters.filter((character) => state.adHocCharacterIds.has(character.id));
+  const origins = characters.map((character) => state.graph?.resolve(character.location?.id) || null);
+  const knownOrigins = origins.filter(Boolean);
+  const originIds = new Set(knownOrigins.map((origin) => Number(origin.id)));
+  const shared = characters.length > 0 && knownOrigins.length === characters.length && originIds.size === 1;
+  return {
+    characters,
+    origin: shared ? knownOrigins[0] : null,
+    shared,
+    hasUnknown: knownOrigins.length !== characters.length
+  };
+}
+
 function adHocRoutePreview() {
-  if (!state.graph || state.adHocCharacterIds.size !== 1) return null;
+  if (!state.graph || !state.adHocCharacterIds.size) return null;
+  const selection = adHocSelectedOrigin();
+  if (!selection.shared) return null;
   const destination = state.graph.resolveStop($('ad-hoc-destination').value);
   if (!destination) return null;
-  const [characterId] = state.adHocCharacterIds;
-  const character = state.characters.find((item) => item.id === characterId);
-  const origin = state.graph.resolve(character?.location?.id);
-  if (!origin) return null;
+  const character = selection.characters[0];
+  const origin = selection.origin;
   const wormholeHubs = selectedAdHocWormholeHubs();
   if (wormholeHubs.length && state.wormholeLoading) return { label: 'Calculating jumps…' };
   if (wormholeHubs.length && state.wormholeError) return { label: 'Jump count unavailable' };
@@ -1980,8 +1994,14 @@ function adHocRoutePreviewMarkup(preview) {
 function renderAdHocRouteStatus(onlineCharacters = state.characters.filter(isCharacterOnline)) {
   if (state.settingAdHocRoute) return;
   const selectedCount = state.adHocCharacterIds.size;
+  const selection = adHocSelectedOrigin();
+  const multipleOriginMessage = selectedCount > 1 && !selection.shared
+    ? selection.hasUnknown
+      ? ' The selected pilots do not share one known current system, so their routes will be calculated separately.'
+      : ' The selected pilots are in different current systems, so their routes will be calculated separately.'
+    : '';
   setAdHocStatus(selectedCount
-    ? `${selectedCount} online pilot${selectedCount === 1 ? '' : 's'} selected.`
+    ? `${selectedCount} online pilot${selectedCount === 1 ? '' : 's'} selected.${multipleOriginMessage}`
     : onlineCharacters.length
       ? 'Choose a destination and one or more online pilots.'
       : 'No online pilots are available.');

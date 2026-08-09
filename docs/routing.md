@@ -85,6 +85,8 @@ Removing a pilot from Route Progress only removes the app’s assignment and pro
 
 The pencil action in Route Progress edits the pilot’s assigned route. Saved assignments open the saved-route editor. Direct assignments reopen the direct-route form with the destination and routing options prefilled; the pilot must be online to send the updated direct route.
 
+The direct-route form previews one calculated path whenever all selected pilots share the same current solar system. When their current systems differ or are not all known, it states that pilot-specific routes will be calculated separately.
+
 ## Route Progress
 
 Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.
