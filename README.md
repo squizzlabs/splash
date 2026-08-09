@@ -1,8 +1,8 @@
-# Just The Trip
+# Splash
 
 > We do the navigating. You do the exploding.
 
-Just The Trip is a static, browser-only route planner for EVE Online. It calculates routes locally from a bundled EVE universe graph, connects multiple characters through EVE SSO, sends routes through ESI, and tracks each online pilot’s progress from live location data.
+Splash is a static, browser-only route planner for EVE Online. It calculates routes locally from a bundled EVE universe graph, connects multiple characters through EVE SSO, sends routes through ESI, and tracks each online pilot’s progress from live location data.
 
 Routes, settings, character authorizations, and last-known locations are stored in the browser’s IndexedDB. The app has no application server or shared database.
 
@@ -61,17 +61,17 @@ The EVE application uses the Authorization Code flow with PKCE and these scopes:
 Registered callback URLs:
 
 - Local: `http://localhost:59832/callback`
-- Production: `https://jtt.zzeve.com/callback`
+- Production: `https://splash.zzeve.com/callback`
 
 Public client IDs, callback URLs, ESI endpoints, and attribution are deployment configuration in [`js/config.js`](js/config.js). They are not user settings. The app does not use or store a client secret.
 
 Every ESI request identifies the app with:
 
 ```text
-Just The Trip / <deployment URL> / Squizz Caphinator
+Splash / <deployment URL> / Squizz Caphinator
 ```
 
-The local deployment uses `http://localhost:59832`; the production deployment uses `https://jtt.zzeve.com`.
+The local deployment uses `http://localhost:59832`; the production deployment uses `https://splash.zzeve.com`.
 
 ## Universe data
 

@@ -1,6 +1,6 @@
 # Deployment and data maintenance
 
-Just The Trip is a static application. Hosting serves the repository’s HTML, CSS, JavaScript, images, and generated universe data directly. There is no server process, token service, or database to deploy.
+Splash is a static application. Hosting serves the repository’s HTML, CSS, JavaScript, images, and generated universe data directly. There is no server process, token service, or database to deploy.
 
 ## Hosting requirements
 
@@ -11,7 +11,7 @@ A deployment needs:
 - Static handling for `/callback`
 - Access from the browser to EVE SSO, ESI, EVE image services, and the EVE-Scout API
 
-The production hostname is `jtt.zzeve.com`. [`CNAME`](../CNAME), [`_redirects`](../_redirects), and [`404.html`](../404.html) provide the repository’s static-host callback and navigation behavior.
+The production hostname is `splash.zzeve.com`. [`CNAME`](../CNAME), [`_redirects`](../_redirects), and [`404.html`](../404.html) provide the repository’s static-host callback and navigation behavior.
 
 `/callback` must serve or redirect to [`auth.html`](../auth.html) while preserving the query string. The local server performs this rewrite directly.
 

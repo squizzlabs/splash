@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 
-const OAUTH_PREFIX = 'just-the-trip:oauth:';
+const OAUTH_PREFIX = 'splash:oauth:';
 
 function base64Url(bytes) {
   return btoa(String.fromCharCode(...bytes))

@@ -9,6 +9,7 @@ import {
   gateSegmentWaypoints,
   itineraryFor,
   nextRouteNavigationAction,
+  normalizeRouteText,
   overrideGameWaypoints,
   parseRouteImport,
   preferenceLabel,
@@ -108,6 +109,15 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+async function repairEncodedRouteText(routes) {
+  const repaired = routes.map(normalizeRouteText);
+  const changed = repaired.filter((route, index) => (
+    route.name !== routes[index].name || route.notes !== routes[index].notes
+  ));
+  if (changed.length) await store.putMany('routes', changed);
+  return repaired;
 }
 
 function portraitUrl(characterId, size = 64) {
@@ -642,7 +652,7 @@ function wormholeInstructionMarkup(wormhole, assignment) {
       ? `<span>Warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`
       : `<span>At</span><strong>${escapeHtml(wormhole.from.name)}</strong><span>warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`;
   return `<div class="pilot-wormhole-stop ${isActive ? 'is-active' : ''} ${expired ? 'is-expired' : ''}">
-    <span class="pilot-wormhole-plus" aria-hidden="true">+</span>
+    <img class="pilot-wormhole-symbol" src="./images/whpd-wormhole.svg" alt="" title="Wormhole">
     <span class="pilot-wormhole-instruction">${instruction}</span>
     <small>${escapeHtml(wormhole.wormholeType)} · max ${escapeHtml(wormhole.maxShipSize)} · ${escapeHtml(formatTimeRemaining(wormhole.expiresAt))}</small>
   </div>`;
@@ -1888,20 +1898,22 @@ function setAdHocStatus(message = '', isError = false) {
   $('ad-hoc-route-status-message').textContent = message;
   $('ad-hoc-route-jumps').textContent = '';
   $('ad-hoc-route-jumps').hidden = true;
+  $('ad-hoc-route-preview').innerHTML = '';
+  $('ad-hoc-route-preview').hidden = true;
   status.classList.toggle('is-error', isError);
 }
 
-function adHocJumpPreview() {
-  if (!state.graph || state.adHocCharacterIds.size !== 1) return '';
+function adHocRoutePreview() {
+  if (!state.graph || state.adHocCharacterIds.size !== 1) return null;
   const destination = state.graph.resolveStop($('ad-hoc-destination').value);
-  if (!destination) return '';
+  if (!destination) return null;
   const [characterId] = state.adHocCharacterIds;
   const character = state.characters.find((item) => item.id === characterId);
   const origin = state.graph.resolve(character?.location?.id);
-  if (!origin) return '';
+  if (!origin) return null;
   const wormholeHubs = selectedAdHocWormholeHubs();
-  if (wormholeHubs.length && state.wormholeLoading) return 'Calculating jumps…';
-  if (wormholeHubs.length && state.wormholeError) return 'Jump count unavailable';
+  if (wormholeHubs.length && state.wormholeLoading) return { label: 'Calculating jumps…' };
+  if (wormholeHubs.length && state.wormholeError) return { label: 'Jump count unavailable' };
 
   try {
     const result = calculateSeedItinerary({
@@ -1916,10 +1928,36 @@ function adHocJumpPreview() {
       securityPenalty: $('ad-hoc-security-penalty').value
     }, origin, character.id);
     const jumps = Math.max(0, (result?.systems?.length || 1) - 1);
-    return `${jumps} jump${jumps === 1 ? '' : 's'}`;
+    return {
+      label: `${jumps} jump${jumps === 1 ? '' : 's'}`,
+      destination,
+      systems: result?.systems || [],
+      wormholeSteps: result?.wormholeSteps || []
+    };
   } catch (_) {
-    return 'No known route';
+    return { label: 'No known route' };
   }
+}
+
+function adHocRoutePreviewMarkup(preview) {
+  const wormholesByDestinationIndex = new Map((preview.wormholeSteps || []).map((wormhole) => [Number(wormhole.toIndex), wormhole]));
+  const finalSystemIndex = preview.systems.length - 1;
+  const docking = preview.destination?.kind === 'station' || preview.destination?.kind === 'structure';
+  const parts = preview.systems.slice(1).flatMap((system, offset) => {
+    const systemIndex = offset + 1;
+    const wormhole = wormholesByDestinationIndex.get(systemIndex);
+    const marker = jumpMarkerMarkup({
+      ...system,
+      isStop: systemIndex === finalSystemIndex,
+      isDockingStop: docking && systemIndex === finalSystemIndex,
+      dockingStop: docking && systemIndex === finalSystemIndex ? preview.destination : null
+    });
+    return [
+      ...(wormhole ? [`<img class="wormhole-route-marker" src="./images/whpd-wormhole.svg" alt="" title="Wormhole · ${escapeHtml(wormhole.from.name)} → ${escapeHtml(wormhole.to.name)}">`] : []),
+      marker
+    ];
+  });
+  return parts.length ? `<div class="pilot-jump-track">${parts.join('')}</div>` : '';
 }
 
 function renderAdHocRouteStatus(onlineCharacters = state.characters.filter(isCharacterOnline)) {
@@ -1934,11 +1972,15 @@ function renderAdHocRouteStatus(onlineCharacters = state.characters.filter(isCha
 }
 
 function updateAdHocJumpPreview() {
-  const previewElement = $('ad-hoc-route-jumps');
-  if (!previewElement || state.settingAdHocRoute || $('ad-hoc-route-status').classList.contains('is-error')) return;
-  const preview = adHocJumpPreview();
-  previewElement.textContent = preview;
-  previewElement.hidden = !preview;
+  const jumpElement = $('ad-hoc-route-jumps');
+  const routeElement = $('ad-hoc-route-preview');
+  if (!jumpElement || !routeElement || state.settingAdHocRoute || $('ad-hoc-route-status').classList.contains('is-error')) return;
+  const preview = adHocRoutePreview();
+  jumpElement.textContent = preview?.label || '';
+  jumpElement.hidden = !preview?.label;
+  const markup = preview?.systems?.length ? adHocRoutePreviewMarkup(preview) : '';
+  routeElement.innerHTML = markup;
+  routeElement.hidden = !markup;
 }
 
 function updateAdHocPreference() {
@@ -2188,7 +2230,7 @@ async function removePilotFromRoute(characterId) {
   if (!character || !assignedRouteForCharacter(character)) return;
   if (!await confirmAction(
     'Remove this pilot from route tracking?',
-    `${character.name}’s assignment and progress will be removed from Just The Trip. Their EVE autopilot route will stay unchanged.`,
+    `${character.name}’s assignment and progress will be removed from Splash. Their EVE autopilot route will stay unchanged.`,
     'Remove pilot'
   )) return;
 
@@ -2597,7 +2639,7 @@ function exportRoutes() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `just-the-trip-routes-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `splash-routes-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast(`Exported ${state.routes.length} route${state.routes.length === 1 ? '' : 's'}.`);
@@ -3117,7 +3159,7 @@ function bindEvents() {
   });
   $('erase-data').addEventListener('click', eraseAllData);
   window.addEventListener('storage', async () => {
-    state.routes = await store.getAll('routes');
+    state.routes = await repairEncodedRouteText(await store.getAll('routes'));
     state.characters = await store.getAll('characters');
     renderAll();
   });
@@ -3160,7 +3202,7 @@ async function initialize() {
       store.getSetting('show-offline-pilots', true)
     ]);
     state.graph = graph;
-    state.routes = routes;
+    state.routes = await repairEncodedRouteText(routes);
     state.characters = characters.sort((a, b) => a.name.localeCompare(b.name));
     state.settings = {
       theme,
@@ -3202,7 +3244,7 @@ async function initialize() {
     state.locationTimer = window.setInterval(refreshOnlineLocations, LOCATION_REFRESH_MS);
   } catch (error) {
     console.error(error);
-    $('routes-list').innerHTML = `<div class="empty-state"><h3>Just The Trip could not start</h3><p>${escapeHtml(error.message)}</p></div>`;
+    $('routes-list').innerHTML = `<div class="empty-state"><h3>Splash could not start</h3><p>${escapeHtml(error.message)}</p></div>`;
     toast(error.message, 'error');
   }
 }

@@ -5,37 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0d1117">
   <meta name="description" content="Plan, assign, and track EVE Online routes for every pilot, entirely in your browser.">
-  <link rel="canonical" href="https://jtt.zzeve.com/">
+  <link rel="canonical" href="https://splash.zzeve.com/">
 
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Just The Trip">
+  <meta property="og:site_name" content="Splash">
   <meta property="og:locale" content="en_US">
-  <meta property="og:url" content="https://jtt.zzeve.com/">
-  <meta property="og:title" content="Just The Trip — EVE Online Route Planner">
+  <meta property="og:url" content="https://splash.zzeve.com/">
+  <meta property="og:title" content="Splash — EVE Online Route Planner">
   <meta property="og:description" content="We do the navigating. You do the exploding. Plan, assign, and track routes for every pilot in your browser.">
-  <meta property="og:image" content="https://jtt.zzeve.com/og-image.png">
-  <meta property="og:image:secure_url" content="https://jtt.zzeve.com/og-image.png">
+  <meta property="og:image" content="https://splash.zzeve.com/og-image.png">
+  <meta property="og:image:secure_url" content="https://splash.zzeve.com/og-image.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Just The Trip logo and slogan beside an EVE route map rendered in blue and acid green.">
+  <meta property="og:image:alt" content="Splash logo and slogan beside an EVE route map rendered in blue and acid green.">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Just The Trip — EVE Online Route Planner">
+  <meta name="twitter:title" content="Splash — EVE Online Route Planner">
   <meta name="twitter:description" content="We do the navigating. You do the exploding. Plan, assign, and track routes for every pilot in your browser.">
-  <meta name="twitter:image" content="https://jtt.zzeve.com/og-image.png">
-  <meta name="twitter:image:alt" content="Just The Trip logo and slogan beside an EVE route map rendered in blue and acid green.">
+  <meta name="twitter:image" content="https://splash.zzeve.com/og-image.png">
+  <meta name="twitter:image:alt" content="Splash logo and slogan beside an EVE route map rendered in blue and acid green.">
 
-  <title>Just The Trip — EVE Online Route Planner</title>
+  <title>Splash — EVE Online Route Planner</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="icon" type="image/png" href="./favicon.png">
   <link rel="stylesheet" href="./css/app.css">
   <script type="module" src="./js/app.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="Just The Trip home">
-      <img class="brand-mark" src="./logo.png" alt="">
-      <span class="brand-type"><strong>JUST THE</strong><span>TRIP</span></span>
+    <a class="brand" href="./" aria-label="Splash home">
+      <img class="brand-mark" src="./images/whpd-wormhole.svg" alt="">
+      <span class="brand-type"><span>SPLASH</span></span>
     </a>
     <p class="brand-slogan">We do the navigating. <strong>You do the explo<span id="slogan-letter">d</span>ing.</strong></p>
     <nav class="main-nav" aria-label="Primary">
@@ -247,7 +248,7 @@
   </main>
 
   <footer class="app-footer">
-    <span><strong>Just The Trip</strong> · local-first route planning for EVE Online</span>
+    <span><strong>Splash</strong> · local-first route planning for EVE Online</span>
     <span>Not affiliated with CCP Games.</span>
   </footer>
 
@@ -532,7 +533,10 @@
         </fieldset>
       </div>
       <div class="modal-footer">
-        <p id="ad-hoc-route-status" class="modal-status" aria-live="polite"><span id="ad-hoc-route-status-message"></span><strong id="ad-hoc-route-jumps" hidden></strong></p>
+        <div class="ad-hoc-route-summary">
+          <p id="ad-hoc-route-status" class="modal-status" aria-live="polite"><span id="ad-hoc-route-status-message"></span><strong id="ad-hoc-route-jumps" hidden></strong></p>
+          <div id="ad-hoc-route-preview" class="ad-hoc-route-preview" aria-label="Calculated route preview" hidden></div>
+        </div>
         <button class="button button-ghost" type="button" data-close-dialog="ad-hoc-route-dialog">Cancel</button>
         <button id="ad-hoc-route-submit" class="button button-primary" type="submit" disabled>Set Route</button>
       </div>

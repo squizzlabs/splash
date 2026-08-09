@@ -1,8 +1,8 @@
 {
-  "name": "just-the-trip",
+  "name": "splash",
   "version": "0.1.0",
   "private": true,
-  "description": "A browser-only EVE Online route planner.",
+  "description": "Splash, a browser-only EVE Online route planner.",
   "license": "0BSD",
   "type": "module",
   "scripts": {

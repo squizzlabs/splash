@@ -348,7 +348,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .jump-marker.is-stop::before { top: 4px; left: 0; width: 10px; height: 2px; }
 .jump-marker.is-stop::after { top: 0; left: 4px; width: 2px; height: 10px; }
 .pilot-wormhole-stop { display: grid; grid-template-columns: 12px minmax(0, auto) 1fr; align-items: baseline; gap: 5px 8px; min-width: 0; color: var(--text); font-size: 10px; }
-.pilot-wormhole-plus { color: var(--accent); font-size: 14px; font-weight: 900; line-height: 10px; text-align: center; }
+.pilot-wormhole-symbol { align-self: center; width: 14px; height: 14px; margin-left: -1px; object-fit: contain; }
 .pilot-wormhole-instruction { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 4px; min-width: 0; }
 .pilot-wormhole-instruction strong { color: var(--text); font-size: 11px; }
 .pilot-wormhole-instruction b { color: var(--text); font-size: 12px; letter-spacing: .04em; text-decoration: underline 2px var(--accent); text-underline-offset: 2px; }
@@ -596,8 +596,12 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .ad-hoc-route-dialog { width: min(820px, calc(100vw - 28px)); overflow: hidden; }
 .ad-hoc-route-dialog .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ad-hoc-route-dialog .modal-footer { flex-wrap: wrap; }
-.ad-hoc-route-dialog .modal-status { display: flex; align-items: baseline; flex: 1 1 280px; flex-wrap: wrap; gap: 4px 12px; color: var(--text); line-height: 1.35; }
+.ad-hoc-route-summary { display: flex; align-items: center; flex: 1 1 470px; gap: 12px; min-width: 0; }
+.ad-hoc-route-dialog .modal-status { display: flex; align-items: baseline; flex: 0 0 auto; flex-wrap: wrap; gap: 4px 12px; color: var(--text); line-height: 1.35; }
 .ad-hoc-route-dialog .modal-status strong { color: var(--accent); white-space: nowrap; }
+.ad-hoc-route-preview { flex: 1 1 auto; min-width: 80px; }
+.ad-hoc-route-preview .pilot-jump-track { align-items: center; }
+.ad-hoc-route-preview .wormhole-route-marker { flex: 0 0 14px; width: 14px; height: 14px; margin: -2px 2px; object-fit: contain; }
 .ad-hoc-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .ad-hoc-destination-field, .ad-hoc-character-picker, .ad-hoc-preference-fieldset, #ad-hoc-security-penalty-field, .ad-hoc-override-option, .ad-hoc-wormholes, .ad-hoc-avoid-builder, .ad-hoc-connection-builder { grid-column: 1 / -1; }
 .ad-hoc-destination-field { margin-top: 0; }

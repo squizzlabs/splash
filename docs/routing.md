@@ -1,6 +1,6 @@
 # Routing and route delivery
 
-Just The Trip separates route planning from pilot assignment. A saved route is a reusable plan. Assigning it calculates and sends a complete pilot-specific itinerary from that pilot’s current location. A direct route calculates and sends the same kind of itinerary without adding a saved route to the Routes list.
+Splash separates route planning from pilot assignment. A saved route is a reusable plan. Assigning it calculates and sends a complete pilot-specific itinerary from that pilot’s current location. A direct route calculates and sends the same kind of itinerary without adding a saved route to the Routes list.
 
 ## Route origins
 
@@ -58,7 +58,7 @@ Thera and Turnur shortcuts use completed, unexpired public signatures from the E
 
 Settings provides the default Thera and Turnur selections. The route editor, assignment dialog, and direct-route dialog can change those selections for the operation being performed.
 
-EVE autopilot cannot traverse a wormhole and wormhole-only systems cannot be submitted as normal ESI waypoints. Just The Trip therefore divides delivery into gate-reachable segments:
+EVE autopilot cannot traverse a wormhole and wormhole-only systems cannot be submitted as normal ESI waypoints. Splash therefore divides delivery into gate-reachable segments:
 
 1. It submits the reachable waypoints before the wormhole.
 2. Route Progress shows the system, `Warp to SIG` instruction, signature ID, destination, wormhole type, ship-size limit, and expiration.
@@ -73,7 +73,7 @@ The planner displays EVE-Scout’s ship-size information but does not exclude a 
 
 Normal delivery sends the route’s explicit stops and lets EVE calculate gate travel between them.
 
-**Override Game Routing** sends every calculated solar system in order so the in-game route follows Just The Trip’s gate path. The option is off by default and is available in Settings and each route workflow.
+**Override Game Routing** sends every calculated solar system in order so the in-game route follows Splash’s gate path. The option is off by default and is available in Settings and each route workflow.
 
 Assigning a saved route to multiple pilots gives every selected pilot the entire route. Route systems are never divided among pilots.
 

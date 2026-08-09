@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No-cache local server for Just The Trip."""
+"""No-cache local server for Splash."""
 
 from argparse import ArgumentParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -28,13 +28,13 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
 
 
 def main():
-    parser = ArgumentParser(description="Serve Just The Trip locally")
+    parser = ArgumentParser(description="Serve Splash locally")
     parser.add_argument("--port", type=int, default=59832)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     handler = lambda *items, **kwargs: NoCacheHandler(*items, directory=str(root), **kwargs)  # noqa: E731
     server = ThreadingHTTPServer(("localhost", args.port), handler)
-    print(f"Just The Trip: http://localhost:{args.port}")
+    print(f"Splash: http://localhost:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

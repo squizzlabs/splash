@@ -1,5 +1,8 @@
-const DB_NAME = 'just-the-trip';
+const DB_NAME = 'splash';
+const LEGACY_DB_NAME = ['just', 'the', 'trip'].join('-');
 const DB_VERSION = 2;
+const STORE_NAMES = Object.freeze(['routes', 'characters', 'names', 'kv']);
+const MIGRATION_KEY = 'splash-storage-migration';
 
 function resultOf(request) {
   return new Promise((resolve, reject) => {
@@ -16,6 +19,95 @@ function done(transaction) {
   });
 }
 
+function deleteDatabase(name) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.addEventListener('success', resolve, { once: true });
+    request.addEventListener('error', () => reject(request.error), { once: true });
+    request.addEventListener('blocked', () => reject(new Error('Close other Splash tabs before erasing local data.')), { once: true });
+  });
+}
+
+function openSplashDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.addEventListener('upgradeneeded', (event) => {
+      const database = request.result;
+      if (event.oldVersion > 0 && event.oldVersion < 2 && database.objectStoreNames.contains('routes')) {
+        database.deleteObjectStore('routes');
+      }
+      if (!database.objectStoreNames.contains('routes')) {
+        const store = database.createObjectStore('routes', { keyPath: 'id' });
+        store.createIndex('status', 'status', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!database.objectStoreNames.contains('characters')) {
+        database.createObjectStore('characters', { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains('names')) {
+        database.createObjectStore('names', { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains('kv')) {
+        database.createObjectStore('kv', { keyPath: 'key' });
+      }
+    });
+    request.addEventListener('success', () => resolve(request.result), { once: true });
+    request.addEventListener('error', () => reject(request.error), { once: true });
+    request.addEventListener('blocked', () => reject(new Error('Close other Splash tabs before upgrading local data.')), { once: true });
+  });
+}
+
+async function legacyDatabaseExists() {
+  if (typeof indexedDB.databases !== 'function') return true;
+  try {
+    return (await indexedDB.databases()).some((database) => database.name === LEGACY_DB_NAME);
+  } catch (_) {
+    return true;
+  }
+}
+
+async function openLegacyDatabase() {
+  if (!await legacyDatabaseExists()) return null;
+  return new Promise((resolve, reject) => {
+    let created = false;
+    const request = indexedDB.open(LEGACY_DB_NAME);
+    request.addEventListener('upgradeneeded', (event) => {
+      created = event.oldVersion === 0;
+    }, { once: true });
+    request.addEventListener('success', () => {
+      const database = request.result;
+      if (!created) return resolve(database);
+      database.close();
+      indexedDB.deleteDatabase(LEGACY_DB_NAME);
+      return resolve(null);
+    }, { once: true });
+    request.addEventListener('error', () => reject(request.error), { once: true });
+  });
+}
+
+async function migrateLegacyData(database) {
+  const marker = await resultOf(database.transaction('kv', 'readonly').objectStore('kv').get(MIGRATION_KEY));
+  if (marker) return;
+
+  const legacy = await openLegacyDatabase();
+  const valuesByStore = new Map();
+  if (legacy) {
+    for (const storeName of STORE_NAMES) {
+      if (!legacy.objectStoreNames.contains(storeName)) continue;
+      valuesByStore.set(storeName, await resultOf(legacy.transaction(storeName, 'readonly').objectStore(storeName).getAll()));
+    }
+    legacy.close();
+  }
+
+  const transaction = database.transaction(STORE_NAMES, 'readwrite');
+  valuesByStore.forEach((values, storeName) => {
+    const store = transaction.objectStore(storeName);
+    values.forEach((value) => store.put(value));
+  });
+  transaction.objectStore('kv').put({ key: MIGRATION_KEY, value: true });
+  await done(transaction);
+}
+
 export class TripStore {
   constructor() {
     this.databasePromise = null;
@@ -23,31 +115,9 @@ export class TripStore {
 
   open() {
     if (this.databasePromise) return this.databasePromise;
-    this.databasePromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.addEventListener('upgradeneeded', (event) => {
-        const database = request.result;
-        if (event.oldVersion > 0 && event.oldVersion < 2 && database.objectStoreNames.contains('routes')) {
-          database.deleteObjectStore('routes');
-        }
-        if (!database.objectStoreNames.contains('routes')) {
-          const store = database.createObjectStore('routes', { keyPath: 'id' });
-          store.createIndex('status', 'status', { unique: false });
-          store.createIndex('updatedAt', 'updatedAt', { unique: false });
-        }
-        if (!database.objectStoreNames.contains('characters')) {
-          database.createObjectStore('characters', { keyPath: 'id' });
-        }
-        if (!database.objectStoreNames.contains('names')) {
-          database.createObjectStore('names', { keyPath: 'id' });
-        }
-        if (!database.objectStoreNames.contains('kv')) {
-          database.createObjectStore('kv', { keyPath: 'key' });
-        }
-      });
-      request.addEventListener('success', () => resolve(request.result), { once: true });
-      request.addEventListener('error', () => reject(request.error), { once: true });
-      request.addEventListener('blocked', () => reject(new Error('Close other Just The Trip tabs before upgrading local data.')), { once: true });
+    this.databasePromise = openSplashDatabase().then(async (database) => {
+      await migrateLegacyData(database);
+      return database;
     });
     return this.databasePromise;
   }
@@ -108,11 +178,7 @@ export class TripStore {
       database.close();
     }
     this.databasePromise = null;
-    await new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(DB_NAME);
-      request.addEventListener('success', resolve, { once: true });
-      request.addEventListener('error', () => reject(request.error), { once: true });
-      request.addEventListener('blocked', () => reject(new Error('Close other Just The Trip tabs before erasing local data.')), { once: true });
-    });
+    await deleteDatabase(DB_NAME);
+    if (await legacyDatabaseExists()) await deleteDatabase(LEGACY_DB_NAME);
   }
 }

@@ -6,10 +6,12 @@ import {
   advanceRouteProgress,
   autopilotStopsFor,
   buildRoute,
+  decodeHtmlEntities,
   duplicateRoute,
   gateSegmentWaypoints,
   itineraryFor,
   mergeCalculatedLegs,
+  normalizeRouteText,
   parseConnectionLines,
   parseList,
   parseRouteImport,
@@ -80,6 +82,26 @@ test('list and connection inputs are normalized', () => {
   assert.throws(() => parseConnectionLines('Jita'), /From > To/);
 });
 
+test('HTML entities pasted into route text are decoded without changing plain apostrophes', () => {
+  assert.equal(decodeHtmlEntities("Don't be salty"), "Don't be salty");
+  assert.equal(decodeHtmlEntities('Don&#039;t be salty'), "Don't be salty");
+  assert.equal(decodeHtmlEntities('Don&amp;#x27;t be salty'), "Don't be salty");
+  assert.equal(decodeHtmlEntities('&lt;script&gt;alert(&quot;nope&quot;)&lt;/script&gt;'), '<script>alert("nope")</script>');
+
+  const normalized = normalizeRouteText({ name: 'Pilot&#39;s route', notes: 'Rock &amp; roll' });
+  assert.equal(normalized.name, "Pilot's route");
+  assert.equal(normalized.notes, 'Rock & roll');
+
+  const route = buildRoute({
+    name: 'Don&#039;t be salty',
+    notes: 'We have oceans for that&amp;#46;',
+    origin: systems.a,
+    stops: [systems.b]
+  });
+  assert.equal(route.name, "Don't be salty");
+  assert.equal(route.notes, 'We have oceans for that.');
+});
+
 test('route request matches the current ESI/SDE routing options', () => {
   const body = routeRequestBody({
     preference: 'Safer',
@@ -133,10 +155,14 @@ test('route exports retain wormhole hubs and import assignments only for charact
   assert.equal('destination' in route, false);
   assert.equal('waypoints' in route, false);
   const payload = serializeRoutes([route]);
+  assert.equal(payload.kind, 'splash-routes');
   const [imported] = parseRouteImport(payload, [], [9002]);
   assert.deepEqual(imported.assignedCharacterIds, [9002]);
   assert.deepEqual(imported.wormholeHubs, ['thera', 'turnur']);
   assert.equal(imported.overrideGameRouting, true);
+
+  const legacyPayload = { ...payload, kind: ['just', 'the', 'trip', 'routes'].join('-') };
+  assert.equal(parseRouteImport(legacyPayload).length, 1);
 });
 
 test('duplicated routes start unassigned', () => {

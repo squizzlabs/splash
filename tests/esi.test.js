@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { ESIClient, isValidEveIssuer, userAgentForHostname } from '../js/esi.js';
 
 test('ESI user agent identifies the active deployment', () => {
-  assert.equal(userAgentForHostname('localhost'), 'Just The Trip / http://localhost:59832 / Squizz Caphinator');
-  assert.equal(userAgentForHostname('127.0.0.1'), 'Just The Trip / http://localhost:59832 / Squizz Caphinator');
-  assert.equal(userAgentForHostname('jtt.zzeve.com'), 'Just The Trip / https://jtt.zzeve.com / Squizz Caphinator');
+  assert.equal(userAgentForHostname('localhost'), 'Splash / http://localhost:59832 / Squizz Caphinator');
+  assert.equal(userAgentForHostname('127.0.0.1'), 'Splash / http://localhost:59832 / Squizz Caphinator');
+  assert.equal(userAgentForHostname('splash.zzeve.com'), 'Splash / https://splash.zzeve.com / Squizz Caphinator');
 });
 
 test('EVE issuer validation accepts canonical trailing-slash variants', () => {

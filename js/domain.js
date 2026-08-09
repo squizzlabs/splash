@@ -2,6 +2,8 @@ import { normalizeWormholeHubs } from './eve-scout.js';
 
 export const ROUTE_STATUSES = Object.freeze(['draft', 'ready', 'archived']);
 export const ROUTE_PREFERENCES = Object.freeze(['Shorter', 'Safer', 'LessSecure']);
+const ROUTE_EXPORT_KIND = 'splash-routes';
+const LEGACY_ROUTE_EXPORT_KIND = ['just', 'the', 'trip', 'routes'].join('-');
 const SECURITY_COLORS = Object.freeze({
   '1.0': '#2c74e0',
   '0.9': '#3a9aeb',
@@ -29,6 +31,39 @@ function fallbackId() {
 
 export function makeId() {
   return globalThis.crypto?.randomUUID?.() || fallbackId();
+}
+
+const HTML_TEXT_ENTITIES = Object.freeze({
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  quot: '"'
+});
+
+export function decodeHtmlEntities(value) {
+  let decoded = String(value ?? '');
+  for (let pass = 0; pass < 3; pass += 1) {
+    const next = decoded.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (match, decimal, hexadecimal, named) => {
+      if (named) return HTML_TEXT_ENTITIES[named.toLowerCase()] ?? match;
+      const codePoint = Number.parseInt(decimal || hexadecimal, decimal ? 10 : 16);
+      if (!Number.isSafeInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        return match;
+      }
+      return String.fromCodePoint(codePoint);
+    });
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
+}
+
+export function normalizeRouteText(route) {
+  return {
+    ...route,
+    name: decodeHtmlEntities(route?.name),
+    notes: decodeHtmlEntities(route?.notes)
+  };
 }
 
 export function parseList(value) {
@@ -413,10 +448,10 @@ export function buildRoute(input, previous = null) {
   return {
     id: previous?.id || input.id || makeId(),
     schemaVersion: 2,
-    name: String(input.name || '').trim() || (mode === 'coverage'
+    name: decodeHtmlEntities(input.name).trim() || (mode === 'coverage'
       ? `${coverageArea.name} coverage`
       : `${origin?.name || 'Live origins'} to ${stops.at(-1).name}`),
-    notes: String(input.notes || '').trim(),
+    notes: decodeHtmlEntities(input.notes).trim(),
     mode,
     coverageArea,
     status,
@@ -458,7 +493,7 @@ export function duplicateRoute(route) {
 
 export function serializeRoutes(routes, config = {}) {
   return {
-    kind: config.kind || 'just-the-trip-routes',
+    kind: config.kind || ROUTE_EXPORT_KIND,
     version: config.version || 2,
     exportedAt: new Date().toISOString(),
     routes: routes.map((route) => structuredClone(route))
@@ -467,8 +502,8 @@ export function serializeRoutes(routes, config = {}) {
 
 export function parseRouteImport(payload, existingRoutes = [], availableCharacterIds = []) {
   const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-  if (!parsed || parsed.kind !== 'just-the-trip-routes' || parsed.version !== 2 || !Array.isArray(parsed.routes)) {
-    throw new Error('This is not a supported Just The Trip route file.');
+  if (!parsed || ![ROUTE_EXPORT_KIND, LEGACY_ROUTE_EXPORT_KIND].includes(parsed.kind) || parsed.version !== 2 || !Array.isArray(parsed.routes)) {
+    throw new Error('This is not a supported Splash route file.');
   }
   if (parsed.routes.length > 500) throw new Error('A route file may contain at most 500 routes.');
 
