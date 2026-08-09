@@ -255,7 +255,8 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .route-column-tools .search-field input { width: 100%; }
 .route-column-tools #route-status-filter { flex: 0 1 130px; min-width: 0; }
 .route-column-tools #route-sort { flex: 0 1 165px; min-width: 0; }
-.pilot-column-tools { justify-content: flex-end; }
+.pilot-column-tools { justify-content: space-between; }
+.pilot-column-tools #pilot-progress-sort { flex: 0 0 200px; width: 200px; }
 .pilot-filter-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-strong); font-size: 11px; font-weight: 700; cursor: pointer; }
 .pilot-filter-toggle input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .toggle-slider { position: relative; width: 34px; height: 18px; background: var(--line); border: 1px solid var(--line); border-radius: 999px; }
@@ -697,7 +698,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
   .route-column-tools { flex-wrap: wrap; }
   .route-column-tools .search-field { flex-basis: 100%; }
   .route-column-tools #route-status-filter, .route-column-tools #route-sort { flex: 1 1 140px; }
-  .pilot-column-tools { justify-content: stretch; }
+  .pilot-column-tools #pilot-progress-sort { flex-basis: 190px; width: 190px; }
   .route-row { grid-template-columns: 1fr auto; gap: 17px; min-height: 0; padding: 18px; }
   .route-line { grid-column: 1 / -1; grid-row: 2; }
   .route-actions { grid-column: 2; grid-row: 1; }

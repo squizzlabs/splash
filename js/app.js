@@ -41,6 +41,7 @@ const state = {
   settings: {
     theme: 'system',
     routeProgressDisplay: 'compact',
+    pilotProgressSort: 'jumps',
     autoRemoveComplete: false,
     routePreference: 'Safer',
     securityPenalty: 50,
@@ -732,10 +733,17 @@ function routeProgressTimelineMarkup(assignment, character) {
 }
 
 function renderAssignedPilots() {
+  const pilotProgressSort = state.settings.pilotProgressSort;
   const allAssignments = state.characters
     .map((character) => ({ character, assignment: assignedPilotProgress(character) }))
     .filter(({ assignment }) => assignment)
-    .sort((left, right) => left.character.name.localeCompare(right.character.name));
+    .sort((left, right) => {
+      const byName = left.character.name.localeCompare(right.character.name);
+      if (pilotProgressSort === 'name') return byName;
+      const leftJumps = Number.isFinite(left.assignment.jumpsRemaining) ? left.assignment.jumpsRemaining : Infinity;
+      const rightJumps = Number.isFinite(right.assignment.jumpsRemaining) ? right.assignment.jumpsRemaining : Infinity;
+      return leftJumps - rightJumps || byName;
+    });
   const assignments = allAssignments;
 
   if (!assignments.length) {
@@ -2784,6 +2792,16 @@ function bindEvents() {
       toast(`Could not update automatic route removal: ${error.message}`, 'error');
     }
   });
+  $('pilot-progress-sort').addEventListener('change', async () => {
+    try {
+      const sort = $('pilot-progress-sort').value;
+      state.settings = { ...state.settings, pilotProgressSort: sort === 'name' ? 'name' : 'jumps' };
+      renderAssignedPilots();
+      await store.setSetting('pilot-progress-sort', state.settings.pilotProgressSort);
+    } catch (error) {
+      toast(`Could not remember route progress sorting: ${error.message}`, 'error');
+    }
+  });
   $('assigned-pilots-list').addEventListener('click', (event) => {
     const remove = event.target.closest('[data-remove-pilot-route]');
     if (remove) {
@@ -3231,6 +3249,7 @@ async function initialize() {
       routeSearch,
       routeStatus,
       routeSort,
+      pilotProgressSort,
       autoRemoveComplete
     ] = await Promise.all([
       UniverseGraph.load('./data/universe.json'),
@@ -3247,6 +3266,7 @@ async function initialize() {
       store.getSetting('route-search', ''),
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
+      store.getSetting('pilot-progress-sort', 'jumps'),
       store.getSetting('auto-remove-complete', false)
     ]);
     state.graph = graph;
@@ -3255,6 +3275,7 @@ async function initialize() {
     state.settings = {
       theme,
       routeProgressDisplay: routeProgressDisplay === 'expanded' ? 'expanded' : 'compact',
+      pilotProgressSort: pilotProgressSort === 'name' ? 'name' : 'jumps',
       autoRemoveComplete: autoRemoveComplete === true,
       routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
       securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
@@ -3266,6 +3287,7 @@ async function initialize() {
     $('route-search').value = typeof routeSearch === 'string' ? routeSearch : '';
     $('route-status-filter').value = ['all', 'ready', 'draft', 'archived'].includes(routeStatus) ? routeStatus : 'all';
     $('route-sort').value = ['updated', 'name', 'jumps'].includes(routeSort) ? routeSort : 'updated';
+    $('pilot-progress-sort').value = state.settings.pilotProgressSort;
     $('auto-remove-complete').checked = state.settings.autoRemoveComplete;
     applyAppearance();
     prepareSystemAutocomplete();

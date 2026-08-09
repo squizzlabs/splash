@@ -87,7 +87,7 @@ Removing a pilot from Route Progress only removes the app’s assignment and pro
 
 Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.
 
-Route Progress compares the live character location with the calculated system path. Transit systems are squares, specified route stops are plus signs, and a final station or structure is a hollow square. Expanding a progress row shows each remaining system’s name, security status, and region.
+Route Progress compares the live character location with the calculated system path. Pilots are sorted by jumps remaining by default, with pilot name available as an alternate sort. Transit systems are squares, specified route stops are plus signs, and a final station or structure is a hollow square. Expanding a progress row shows each remaining system’s name, security status, and region.
 
 While the page is open, each observed location update advances the tracked path and triggers the next staged waypoint when needed. After the page is reopened, the app catches up from the pilot’s current system when that system can be matched to the route. Travel completed before the pilot moved somewhere else cannot be reconstructed from ESI’s current-location response.
 
