@@ -83,6 +83,8 @@ Removing a pilot from Route Progress only removes the app’s assignment and pro
 
 **Auto-remove complete** applies that same tracking-only removal automatically when a pilot reaches the final system, or docks at the final station or structure. Offline pilots remain visible in Route Progress while they still have an assignment.
 
+The pencil action in Route Progress edits the pilot’s assigned route. Saved assignments open the saved-route editor. Direct assignments reopen the direct-route form with the destination and routing options prefilled; the pilot must be online to send the updated direct route.
+
 ## Route Progress
 
 Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.

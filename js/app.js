@@ -63,6 +63,7 @@ const state = {
   adHocAvoidSystems: [],
   adHocConnections: [],
   adHocWormholeHubs: new Set(),
+  editingDirectRouteCharacterId: null,
   settingAdHocRoute: false,
   clearRouteCharacterIds: new Set(),
   clearingRoutes: false,
@@ -764,12 +765,20 @@ function renderAssignedPilots() {
           : 'jumps left';
     const jumpStatusClass = assignment.docking ? 'is-docking' : assignment.complete ? 'is-complete' : '';
     const routeLabel = assignment.route.name.replace(/^To\s+/i, '→ ');
+    const editLabel = character.directRoute
+      ? `Edit ${character.name}’s direct route`
+      : `Edit ${assignment.route.name}`;
     return `<article class="pilot-progress-row ${online ? '' : 'is-offline'}">
       <img src="${portraitUrl(character.id, 64)}" alt="">
       <div class="pilot-progress-identity"><strong>${escapeHtml(character.name)}</strong><span>${escapeHtml(routeLabel)}</span></div>
       <div class="pilot-progress-location"><span>${online ? 'Current location' : 'Last known location'}</span><strong>${escapeHtml(location)}</strong></div>
       <div class="pilot-progress-jumps ${jumpStatusClass}"><strong>${jumps}</strong><span>${jumpLabel}</span></div>
-      <button class="pilot-progress-remove" type="button" data-remove-pilot-route="${character.id}" aria-label="Remove ${escapeHtml(character.name)} from route tracking" title="Remove from route tracking; keep the EVE autopilot route">×</button>
+      <div class="pilot-progress-actions">
+        <button class="pilot-progress-edit" type="button" data-edit-pilot-route="${character.id}" aria-label="${escapeHtml(editLabel)}" title="${escapeHtml(editLabel)}">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"></path><path d="m13.5 6.5 4 4"></path></svg>
+        </button>
+        <button class="pilot-progress-remove" type="button" data-remove-pilot-route="${character.id}" aria-label="Remove ${escapeHtml(character.name)} from route tracking" title="Remove from route tracking; keep the EVE autopilot route">×</button>
+      </div>
       ${routeProgressTimelineMarkup(assignment, character)}
       ${assignment.progress.waypointError && assignment.progress.waypointAttemptKey === assignment.nextAction?.key
         ? `<div class="pilot-waypoint-error">Could not set next waypoint: ${escapeHtml(assignment.progress.waypointError)}</div>`
@@ -2004,6 +2013,7 @@ function renderAdHocRouteDialog() {
   const onlineCharacters = state.characters.filter(isCharacterOnline);
   const onlineCharacterIds = new Set(onlineCharacters.map((character) => character.id));
   state.adHocCharacterIds = new Set([...state.adHocCharacterIds].filter((id) => onlineCharacterIds.has(id)));
+  const editingCharacterId = Number(state.editingDirectRouteCharacterId) || null;
   $('ad-hoc-controls').disabled = state.settingAdHocRoute;
   $('ad-hoc-wormhole-thera').checked = state.adHocWormholeHubs.has('thera');
   $('ad-hoc-wormhole-turnur').checked = state.adHocWormholeHubs.has('turnur');
@@ -2012,16 +2022,22 @@ function renderAdHocRouteDialog() {
   $('ad-hoc-character-options').innerHTML = state.characters.map((character) => {
     const online = isCharacterOnline(character);
     const location = character.location?.stop?.name || character.location?.name || 'Location unavailable';
-    const selectable = online && !state.settingAdHocRoute;
-    return `<label class="character-option ${selectable ? '' : 'is-disabled'} ${online ? '' : 'is-offline'}" ${online ? '' : 'title="Offline pilots cannot receive routes"'}>
+    const selectedForEditing = !editingCharacterId || character.id === editingCharacterId;
+    const selectable = online && selectedForEditing && !state.settingAdHocRoute;
+    const unavailableTitle = !online
+      ? 'Offline pilots cannot receive routes'
+      : editingCharacterId && !selectedForEditing
+        ? 'This edit applies only to the assigned pilot'
+        : '';
+    return `<label class="character-option ${selectable ? '' : 'is-disabled'} ${online ? '' : 'is-offline'}" ${unavailableTitle ? `title="${unavailableTitle}"` : ''}>
       <input type="checkbox" value="${character.id}" ${state.adHocCharacterIds.has(character.id) ? 'checked' : ''} ${selectable ? '' : 'disabled'}>
       <span><img src="${portraitUrl(character.id, 64)}" alt=""><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(online ? `Online · ${location}` : `Offline · ${location}`)}</small></span>
     </label>`;
   }).join('');
   $('ad-hoc-character-empty').hidden = onlineCharacters.length > 0;
   const selectedCount = state.adHocCharacterIds.size;
-  $('ad-hoc-select-all').disabled = state.settingAdHocRoute || !onlineCharacters.length || selectedCount === onlineCharacters.length;
-  $('ad-hoc-select-none').disabled = state.settingAdHocRoute || selectedCount === 0;
+  $('ad-hoc-select-all').disabled = Boolean(editingCharacterId) || state.settingAdHocRoute || !onlineCharacters.length || selectedCount === onlineCharacters.length;
+  $('ad-hoc-select-none').disabled = Boolean(editingCharacterId) || state.settingAdHocRoute || selectedCount === 0;
   $('ad-hoc-route-submit').disabled = state.settingAdHocRoute || selectedCount === 0;
   $('ad-hoc-avoid-list').innerHTML = state.adHocAvoidSystems.map((system, index) => `<span class="system-chip">
     ${escapeHtml(system.name)}
@@ -2037,23 +2053,51 @@ function renderAdHocRouteDialog() {
   else updateAdHocJumpPreview();
 }
 
-function openAdHocRouteDialog() {
+function openAdHocRouteDialog(route = null, character = null) {
   hideSystemAutocomplete();
   $('ad-hoc-route-form').reset();
-  state.adHocCharacterIds = soleOnlineCharacterSelection();
-  state.adHocAvoidSystems = state.settings.defaultAvoidSystems.map((system) => ({ ...system }));
-  state.adHocConnections = [];
-  state.adHocWormholeHubs = new Set(alwaysWormholeHubs());
+  const editingDirectRoute = Boolean(route && character?.directRoute);
+  state.editingDirectRouteCharacterId = editingDirectRoute ? character.id : null;
+  state.adHocCharacterIds = editingDirectRoute
+    ? new Set(isCharacterOnline(character) ? [character.id] : [])
+    : soleOnlineCharacterSelection();
+  state.adHocAvoidSystems = (route?.avoidSystems || state.settings.defaultAvoidSystems).map((system) => ({ ...system }));
+  state.adHocConnections = (route?.connections || []).map((connection) => ({
+    from: { ...connection.from },
+    to: { ...connection.to }
+  }));
+  state.adHocWormholeHubs = new Set(route ? normalizeWormholeHubs(route.wormholeHubs) : alwaysWormholeHubs());
   state.settingAdHocRoute = false;
-  const preference = routingPreference();
+  $('ad-hoc-route-title').textContent = editingDirectRoute ? `Edit route · ${character.name}` : 'Take me to…';
+  $('ad-hoc-route-submit').textContent = editingDirectRoute ? 'Update Route' : 'Set Route';
+  $('ad-hoc-destination').value = route?.stops?.at(-1)?.name || '';
+  const preference = route?.preference || routingPreference();
   document.querySelector(`input[name="ad-hoc-preference"][value="${preference}"]`).checked = true;
-  $('ad-hoc-security-penalty').value = routingSecurityPenalty();
+  $('ad-hoc-security-penalty').value = route?.securityPenalty ?? routingSecurityPenalty();
   $('ad-hoc-security-penalty-output').textContent = $('ad-hoc-security-penalty').value;
-  $('ad-hoc-override-game-routing').checked = state.settings.overrideGameRouting === true;
+  $('ad-hoc-override-game-routing').checked = route
+    ? route.overrideGameRouting === true
+    : state.settings.overrideGameRouting === true;
   setAdHocStatus();
   renderAdHocRouteDialog();
   if (!$('ad-hoc-route-dialog').open) $('ad-hoc-route-dialog').showModal();
+  if (state.adHocWormholeHubs.size) refreshWormholeConnections().catch(() => {});
   setTimeout(() => $('ad-hoc-destination').focus(), 50);
+}
+
+function editAssignedPilotRoute(characterId) {
+  const character = state.characters.find((item) => item.id === Number(characterId));
+  const route = assignedRouteForCharacter(character);
+  if (!character || !route) return;
+  if (character.directRoute) {
+    if (!isCharacterOnline(character)) {
+      toast(`${character.name} must be online to update their direct route.`, 'error');
+      return;
+    }
+    openAdHocRouteDialog(route, character);
+    return;
+  }
+  openRouteEditor(route);
 }
 
 function selectAllAdHocPilots(selected) {
@@ -2301,6 +2345,7 @@ async function removePilotFromRoute(characterId) {
 }
 
 async function setAdHocRoute() {
+  const updatingExistingRoute = Boolean(state.editingDirectRouteCharacterId);
   flushAdHocInputs();
   const destination = resolveStop($('ad-hoc-destination').value, 'Destination');
   const selected = state.characters.filter((character) => state.adHocCharacterIds.has(character.id));
@@ -2402,7 +2447,7 @@ async function setAdHocRoute() {
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     await autoRemoveCompletedPilots();
     renderAll();
-    toast(`Route to ${destination.name} set for ${successful.length} pilot${successful.length === 1 ? '' : 's'}.`);
+    toast(`Route to ${destination.name} ${updatingExistingRoute ? 'updated' : 'set'} for ${successful.length} pilot${successful.length === 1 ? '' : 's'}.`);
   }
 
   state.adHocCharacterIds = new Set(failed.map(({ character }) => character.id));
@@ -2412,6 +2457,7 @@ async function setAdHocRoute() {
   }
 
   $('ad-hoc-route-dialog').close();
+  state.editingDirectRouteCharacterId = null;
 }
 
 async function saveRouteAssignments(event) {
@@ -2758,7 +2804,7 @@ async function eraseAllData() {
 function bindEvents() {
   bindSystemAutocomplete();
   document.querySelectorAll('[data-view-target]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.viewTarget)));
-  $('header-ad-hoc-route').addEventListener('click', openAdHocRouteDialog);
+  $('header-ad-hoc-route').addEventListener('click', () => openAdHocRouteDialog());
   $('header-clear-routes').addEventListener('click', openClearRoutesDialog);
   $('header-new-route').addEventListener('click', () => openRouteEditor());
   $('header-add-character').addEventListener('click', beginAuthorization);
@@ -2803,6 +2849,11 @@ function bindEvents() {
     }
   });
   $('assigned-pilots-list').addEventListener('click', (event) => {
+    const edit = event.target.closest('[data-edit-pilot-route]');
+    if (edit) {
+      editAssignedPilotRoute(edit.dataset.editPilotRoute);
+      return;
+    }
     const remove = event.target.closest('[data-remove-pilot-route]');
     if (remove) {
       removePilotFromRoute(remove.dataset.removePilotRoute).catch((error) => {
