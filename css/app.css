@@ -307,7 +307,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-list { display: grid; gap: 8px; }
 .pilot-progress-row {
   display: grid;
-  grid-template-columns: 38px minmax(120px, .85fr) minmax(150px, 1.35fr) 66px 54px;
+  grid-template-columns: 38px minmax(120px, .85fr) minmax(150px, 1.35fr) 66px 26px;
   align-items: center;
   gap: 12px;
   min-height: 76px;
@@ -329,7 +329,7 @@ select { min-height: var(--control-height); padding: 0 34px 0 12px; }
 .pilot-progress-location strong { margin-top: 2px; font-size: 12px; }
 .pilot-progress-jumps { text-align: right; }
 .pilot-progress-jumps strong { display: block; font-size: 18px; line-height: 1.1; }
-.pilot-progress-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.pilot-progress-actions { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 .pilot-progress-edit, .pilot-progress-remove { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; line-height: 1; }
 .pilot-progress-edit svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .pilot-progress-edit:hover, .pilot-progress-edit:focus-visible { color: var(--text); background: var(--panel-strong); border-color: var(--muted); }
@@ -706,7 +706,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
   .route-row { grid-template-columns: 1fr auto; gap: 17px; min-height: 0; padding: 18px; }
   .route-line { grid-column: 1 / -1; grid-row: 2; }
   .route-actions { grid-column: 2; grid-row: 1; }
-  .pilot-progress-row { grid-template-columns: 38px minmax(0, 1fr) 66px 54px; }
+  .pilot-progress-row { grid-template-columns: 38px minmax(0, 1fr) 66px 26px; }
   .pilot-progress-location { grid-column: 2; grid-row: 2; }
   .pilot-progress-jumps { grid-column: 3; grid-row: 1 / span 2; }
   .pilot-progress-actions { grid-column: 4; grid-row: 1 / span 2; }
