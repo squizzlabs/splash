@@ -519,6 +519,7 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .app-footer-links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .app-footer-github { display: block; width: 24px; height: 24px; }
 .app-footer-suite { display: block; height: 20px; width: auto; }
+.app-footer-disclaimer { cursor: help; text-decoration: underline; text-underline-offset: 2px; }
 
 .modal {
   width: min(820px, calc(100vw - 28px));
