@@ -79,8 +79,7 @@ const state = {
   wormholeLoading: false,
   wormholePromise: null,
   autoRemovePromise: null,
-  progressDisplayOverrides: new Map(),
-  sloganTimer: null
+  progressDisplayOverrides: new Map()
 };
 
 const autocomplete = {
@@ -97,14 +96,6 @@ const waypointDrag = {
 };
 
 const $ = (id) => document.getElementById(id);
-
-function updateSlogan() {
-  const letter = $('slogan-letter');
-  if (!letter) return;
-  letter.textContent = Math.floor(Date.now() / 60_000) % 2 === 0 ? 'd' : 'r';
-  window.clearTimeout(state.sloganTimer);
-  state.sloganTimer = window.setTimeout(updateSlogan, 60_025 - (Date.now() % 60_000));
-}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -3303,7 +3294,6 @@ function bindEvents() {
 }
 
 async function initialize() {
-  updateSlogan();
   try {
     const [
       graph,

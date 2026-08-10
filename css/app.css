@@ -138,9 +138,6 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-type { display: grid; line-height: .95; letter-spacing: .02em; }
 .brand-type strong { font-size: 10px; letter-spacing: .18em; color: var(--muted-strong); }
 .brand-type span { color: var(--accent); font-size: 22px; font-weight: 850; letter-spacing: -.04em; }
-.brand-slogan { display: grid; align-content: center; flex: 0 0 144px; width: 144px; gap: 1px; margin: 0; color: var(--muted-strong); font-size: 11px; line-height: 1.18; white-space: nowrap; }
-.brand-slogan strong { display: block; color: var(--accent); }
-
 .main-nav { display: flex; align-items: center; padding: 4px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 11px; }
 .nav-item {
   display: inline-flex;
@@ -679,7 +676,6 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 }
 
 @media (max-width: 1050px) {
-  .brand-slogan { display: none; }
   .main-nav { position: fixed; left: 50%; bottom: 14px; z-index: 25; transform: translateX(-50%); box-shadow: var(--shadow); }
   .route-row { grid-template-columns: minmax(170px, 1fr) minmax(280px, 1.5fr) 87px; }
   .route-metrics { display: none; }

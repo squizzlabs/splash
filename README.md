@@ -1,6 +1,6 @@
 # Splash
 
-> We do the navigating. You do the exploding.
+> Getting lost is optional.
 
 Splash is a static, browser-only route planner for EVE Online. It calculates routes locally from a bundled EVE universe graph, connects multiple characters through EVE SSO, sends routes through ESI, and tracks each online pilot’s progress from live location data.
 
