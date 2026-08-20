@@ -407,10 +407,14 @@ export function wormholeSignatureCandidates(map, systemId, targetConnectionId = 
     const signature = connectionSignatureAt(connection, id);
     if (signature) used.add(signature.toUpperCase());
   });
-  return (map.signatures?.[id] || []).filter((signature) => (
-    /wormhole/i.test(`${signature.group} ${signature.type} ${signature.name}`)
-    && !used.has(signature.id.toUpperCase())
-  ));
+  return (map.signatures?.[id] || []).filter((signature) => {
+    const description = `${signature.group} ${signature.type} ${signature.name}`;
+    const unclassified = ['Cosmic Signature', 'Unknown'].includes(signature.group)
+      && !signature.type
+      && !signature.name;
+    return (/wormhole/i.test(description) || unclassified)
+      && !used.has(signature.id.toUpperCase());
+  });
 }
 
 export function assignConnectionSignature(map, connectionIdValue, systemId, signatureId, now = () => new Date().toISOString()) {

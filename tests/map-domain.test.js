@@ -174,10 +174,11 @@ test('wormhole prompt candidates exclude sites and signatures used by other conn
   map = upsertSignatures(map, 1, [
     { id: 'AAA-111', group: 'Wormhole', type: 'Unstable Wormhole' },
     { id: 'BBB-222', group: 'Wormhole', type: 'Unstable Wormhole' },
+    { id: 'DDD-444', group: 'Cosmic Signature', type: '' },
     { id: 'CCC-333', group: 'Data Site', type: 'Unsecured Site' }
   ], now);
   map = assignConnectionSignature(map, '1:3', 1, 'AAA-111', now);
-  assert.deepEqual(wormholeSignatureCandidates(map, 1, '1:4').map((signature) => signature.id), ['BBB-222']);
+  assert.deepEqual(wormholeSignatureCandidates(map, 1, '1:4').map((signature) => signature.id), ['BBB-222', 'DDD-444']);
 });
 
 test('assigning a jump signature labels the correct connection side and records manual IDs', () => {

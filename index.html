@@ -621,6 +621,27 @@
     </form>
   </dialog>
 
+  <dialog id="map-connection-dialog" class="modal map-connection-dialog" aria-labelledby="map-connection-title">
+    <form id="map-connection-form" autocomplete="off">
+      <div class="modal-header">
+        <div><div class="eyebrow">Wormhole condition</div><h2 id="map-connection-title">Edit connection</h2></div>
+        <button class="modal-close" type="button" data-close-dialog="map-connection-dialog" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="map-connection-systems" class="map-connection-systems"></p>
+        <div class="map-connection-condition-grid">
+          <label><span>Lifetime</span><select id="map-connection-life"><option value="stable">Stable</option><option value="eol">End of life</option></select></label>
+          <label><span>Mass remaining</span><select id="map-connection-mass"><option value="stable">Stable</option><option value="reduced">Reduced</option><option value="critical">Critical</option></select></label>
+          <label><span>Maximum ship size</span><select id="map-connection-size"><option value="frigate">Frigate</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="xlarge">XL</option></select></label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="button button-ghost" type="button" data-close-dialog="map-connection-dialog">Cancel</button>
+        <button class="button button-primary" type="submit">Save condition</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="map-jump-dialog" class="modal map-jump-dialog" aria-labelledby="map-jump-title">
     <form id="map-jump-form" autocomplete="off">
       <div class="modal-header"><div><div class="eyebrow">Wormhole detected</div><h2 id="map-jump-title">Which signature did you use?</h2></div></div>

@@ -76,6 +76,41 @@ test('character online checks bypass the browser response cache', async () => {
   assert.equal(presence.online, true);
 });
 
+test('concurrent ESI requests share one token refresh without overwriting character state', async () => {
+  let character = {
+    id: 42,
+    name: 'Pilot',
+    refreshToken: 'old-refresh',
+    accessToken: 'expired',
+    expiresAt: 0,
+    directRoute: null
+  };
+  const store = {
+    get: async () => character,
+    update: async (_storeName, _key, updater) => {
+      character = updater(character);
+      return character;
+    }
+  };
+  const client = new ESIClient(store);
+  let refreshCount = 0;
+  client.clientId = async () => 'client-id';
+  client.requestToken = async () => {
+    refreshCount += 1;
+    character = { ...character, directRoute: { id: 'route-from-another-tab' } };
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { access_token: 'fresh-access', refresh_token: 'fresh-refresh', expires_in: 1200 };
+  };
+  client.validateAccessToken = async () => ({ scp: ['esi-location.read_location.v1'] });
+
+  const tokens = await Promise.all([client.accessToken(42), client.accessToken(42)]);
+
+  assert.deepEqual(tokens, ['fresh-access', 'fresh-access']);
+  assert.equal(refreshCount, 1);
+  assert.equal(character.directRoute.id, 'route-from-another-tab');
+  assert.equal(character.refreshToken, 'fresh-refresh');
+});
+
 test('setting the current location as a waypoint clears existing waypoints', async () => {
   const client = new ESIClient({
     get: async () => null,

@@ -3,6 +3,11 @@ const LEGACY_DB_NAME = ['just', 'the', 'trip'].join('-');
 const DB_VERSION = 2;
 const STORE_NAMES = Object.freeze(['routes', 'characters', 'names', 'kv']);
 const MIGRATION_KEY = 'splash-storage-migration';
+const CHANGE_CHANNEL = 'splash:storage:v1';
+
+function instanceId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function resultOf(request) {
   return new Promise((resolve, reject) => {
@@ -111,12 +116,43 @@ async function migrateLegacyData(database) {
 export class TripStore {
   constructor() {
     this.databasePromise = null;
+    this.sourceId = instanceId();
+    this.changeListeners = new Set();
+    this.changeChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(CHANGE_CHANNEL) : null;
+    if (this.changeChannel) {
+      this.changeChannel.addEventListener('message', (event) => {
+        const change = event.data;
+        if (!change || change.sourceId === this.sourceId || change.type !== 'change') return;
+        this.changeListeners.forEach((listener) => listener(change));
+      });
+    }
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  publish(storeName, operation, keys = []) {
+    this.changeChannel?.postMessage({
+      type: 'change',
+      sourceId: this.sourceId,
+      storeName,
+      operation,
+      keys: [...keys].map(String),
+      changedAt: Date.now()
+    });
   }
 
   open() {
     if (this.databasePromise) return this.databasePromise;
     this.databasePromise = openSplashDatabase().then(async (database) => {
       await migrateLegacyData(database);
+      database.addEventListener('versionchange', () => {
+        database.close();
+        this.databasePromise = null;
+      });
       return database;
     });
     return this.databasePromise;
@@ -137,6 +173,7 @@ export class TripStore {
     const transaction = database.transaction(storeName, 'readwrite');
     transaction.objectStore(storeName).put(value);
     await done(transaction);
+    this.publish(storeName, 'put', [storeName === 'kv' ? value.key : value.id]);
     return value;
   }
 
@@ -147,6 +184,7 @@ export class TripStore {
     const store = transaction.objectStore(storeName);
     values.forEach((value) => store.put(value));
     await done(transaction);
+    this.publish(storeName, 'put-many', values.map((value) => storeName === 'kv' ? value.key : value.id));
   }
 
   async delete(storeName, key) {
@@ -154,6 +192,7 @@ export class TripStore {
     const transaction = database.transaction(storeName, 'readwrite');
     transaction.objectStore(storeName).delete(key);
     await done(transaction);
+    this.publish(storeName, 'delete', [key]);
   }
 
   async clear(storeName) {
@@ -161,6 +200,7 @@ export class TripStore {
     const transaction = database.transaction(storeName, 'readwrite');
     transaction.objectStore(storeName).clear();
     await done(transaction);
+    this.publish(storeName, 'clear');
   }
 
   async getSetting(key, fallback = null) {
@@ -172,6 +212,49 @@ export class TripStore {
     return this.put('kv', { key, value });
   }
 
+  async update(storeName, key, updater, fallback = null) {
+    if (typeof updater !== 'function') throw new TypeError('A storage update callback is required.');
+    const database = await this.open();
+    const transaction = database.transaction(storeName, 'readwrite');
+    const objectStore = transaction.objectStore(storeName);
+    const request = objectStore.get(key);
+    let nextValue;
+    let updateError = null;
+    let changed = false;
+    return new Promise((resolve, reject) => {
+      request.addEventListener('success', () => {
+        try {
+          const currentValue = request.result ?? fallback;
+          nextValue = updater(currentValue);
+          if (nextValue && typeof nextValue.then === 'function') {
+            throw new TypeError('Storage update callbacks must be synchronous.');
+          }
+          changed = !Object.is(nextValue, currentValue);
+          if (changed) objectStore.put(nextValue);
+        } catch (error) {
+          updateError = error;
+          transaction.abort();
+        }
+      }, { once: true });
+      transaction.addEventListener('complete', () => {
+        if (changed) this.publish(storeName, 'update', [key]);
+        resolve(nextValue);
+      }, { once: true });
+      transaction.addEventListener('abort', () => reject(updateError || transaction.error), { once: true });
+      transaction.addEventListener('error', () => reject(updateError || transaction.error), { once: true });
+    });
+  }
+
+  async updateSetting(key, updater, fallback = null) {
+    const record = await this.update('kv', key, (current) => {
+      const currentValue = current ? current.value : fallback;
+      const nextValue = updater(currentValue);
+      if (Object.is(nextValue, currentValue) && current) return current;
+      return { key, value: nextValue };
+    }, null);
+    return record ? record.value : fallback;
+  }
+
   async destroy() {
     if (this.databasePromise) {
       const database = await this.databasePromise;
@@ -180,5 +263,13 @@ export class TripStore {
     this.databasePromise = null;
     await deleteDatabase(DB_NAME);
     if (await legacyDatabaseExists()) await deleteDatabase(LEGACY_DB_NAME);
+    this.publish('*', 'destroy');
+  }
+
+  close() {
+    this.databasePromise?.then((database) => database.close()).catch(() => {});
+    this.databasePromise = null;
+    this.changeChannel?.close();
+    this.changeListeners.clear();
   }
 }

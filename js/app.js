@@ -24,17 +24,32 @@ import { MapperView } from './map-view.js';
 import { parseViewHash, viewHash } from './navigation.js';
 import { UniverseGraph } from './route-planner.js';
 import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnlineCharacterData } from './presence.js';
+import { TabCoordinator } from './tab-coordinator.js';
 
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
 const ONLINE_REFRESH_MS = 15_000;
 const LOCATION_REFRESH_MS = 8_000;
 const DEFAULT_AVOID_SYSTEM_IDS = Object.freeze([30000142]);
+const ACTIVE_CHARACTER_SESSION_KEY = 'splash:active-character-id';
+const LOCAL_TAB_SETTING_KEYS = Object.freeze([
+  'active-character-id', 'mapper-viewport', 'route-search', 'route-status-filter', 'route-sort'
+]);
 if (redirectToLocalhost) {
   window.location.replace(`http://localhost:59832${window.location.pathname}${window.location.search}${window.location.hash}`);
 }
 
 const store = new TripStore();
-const esi = new ESIClient(store);
+const rawEsi = new ESIClient(store);
+const tabCoordinator = new TabCoordinator();
+const coordinatedEsiCall = (method, args) => tabCoordinator.request(`esi:${method}`, args);
+const esi = {
+  beginAuthorization: (...args) => rawEsi.beginAuthorization(...args),
+  characterLocation: (...args) => coordinatedEsiCall('characterLocation', args),
+  characterOnline: (...args) => coordinatedEsiCall('characterOnline', args),
+  characterShip: (...args) => coordinatedEsiCall('characterShip', args),
+  setWaypoint: (...args) => coordinatedEsiCall('setWaypoint', args),
+  setWaypoints: (...args) => coordinatedEsiCall('setWaypoints', args)
+};
 const eveScout = new EveScoutClient();
 const state = {
   graph: null,
@@ -86,6 +101,19 @@ const state = {
   autoRemovePromise: null,
   progressDisplayOverrides: new Map()
 };
+
+let appInitialized = false;
+let externalSyncTimer = null;
+let externalSyncChain = Promise.resolve();
+const pendingExternalStores = new Map();
+
+store.subscribe((change) => queueExternalStoreChange(change));
+tabCoordinator.setRequestHandler((method, args) => handleCoordinatedRequest(method, args));
+tabCoordinator.onLeadershipChange((isLeader) => {
+  if (isLeader && appInitialized && state.characters.length) {
+    queueMicrotask(() => refreshAllLocations({ quiet: true }));
+  }
+});
 
 const autocomplete = {
   input: null,
@@ -457,6 +485,7 @@ async function switchActiveCharacter(characterId) {
   const character = state.characters.find((candidate) => Number(candidate.id) === Number(characterId));
   if (!character || state.activeCharacterId === character.id) return false;
   state.activeCharacterId = character.id;
+  sessionStorage.setItem(ACTIVE_CHARACTER_SESSION_KEY, String(character.id));
   await store.setSetting('active-character-id', character.id);
   state.mapper?.setActiveCharacter(character.id, { fit: currentViewName() === 'map' });
   renderHeader();
@@ -1128,6 +1157,141 @@ function renderAll() {
   if ($('route-detail').open && openDetail) openRouteDetail(openDetail);
 }
 
+function queueExternalStoreChange(change) {
+  if (change.operation === 'destroy') {
+    window.location.reload();
+    return;
+  }
+  if (change.storeName === 'names') return;
+  if (change.storeName === 'kv'
+    && (change.keys || []).length
+    && change.keys.every((key) => LOCAL_TAB_SETTING_KEYS.includes(String(key)))) return;
+  if (!pendingExternalStores.has(change.storeName)) pendingExternalStores.set(change.storeName, new Set());
+  const keys = pendingExternalStores.get(change.storeName);
+  (change.keys || []).forEach((key) => keys.add(String(key)));
+  window.clearTimeout(externalSyncTimer);
+  externalSyncTimer = window.setTimeout(flushExternalStoreChanges, 25);
+}
+
+function flushExternalStoreChanges() {
+  if (!appInitialized || !pendingExternalStores.size) return;
+  const changes = new Map([...pendingExternalStores].map(([storeName, storeKeys]) => [storeName, new Set(storeKeys)]));
+  pendingExternalStores.clear();
+  externalSyncChain = externalSyncChain
+    .then(() => applyExternalStoreChanges(changes))
+    .catch((error) => console.warn('Could not refresh cross-tab changes:', error));
+}
+
+async function reloadGlobalSettings(keys) {
+  const globalKeys = new Set([
+    'theme', 'routeProgressDisplay', 'routePreference', 'securityPenalty', 'alwaysUseThera',
+    'alwaysUseTurnur', 'overrideGameRouting', 'defaultAvoidSystems', 'pilot-progress-sort',
+    'auto-remove-complete'
+  ]);
+  if (![...keys].some((key) => globalKeys.has(key))) return false;
+  const [
+    theme,
+    routeProgressDisplay,
+    routePreference,
+    securityPenalty,
+    alwaysUseThera,
+    alwaysUseTurnur,
+    overrideGameRouting,
+    defaultAvoidSystemIds,
+    pilotProgressSort,
+    autoRemoveComplete
+  ] = await Promise.all([
+    store.getSetting('theme', state.settings.theme),
+    store.getSetting('routeProgressDisplay', state.settings.routeProgressDisplay),
+    store.getSetting('routePreference', state.settings.routePreference),
+    store.getSetting('securityPenalty', state.settings.securityPenalty),
+    store.getSetting('alwaysUseThera', state.settings.alwaysUseThera),
+    store.getSetting('alwaysUseTurnur', state.settings.alwaysUseTurnur),
+    store.getSetting('overrideGameRouting', state.settings.overrideGameRouting),
+    store.getSetting('defaultAvoidSystems', state.settings.defaultAvoidSystems.map((system) => system.id)),
+    store.getSetting('pilot-progress-sort', state.settings.pilotProgressSort),
+    store.getSetting('auto-remove-complete', state.settings.autoRemoveComplete)
+  ]);
+  state.settings = {
+    ...state.settings,
+    theme,
+    routeProgressDisplay: routeProgressDisplay === 'expanded' ? 'expanded' : 'compact',
+    pilotProgressSort: pilotProgressSort === 'name' ? 'name' : 'jumps',
+    autoRemoveComplete: autoRemoveComplete === true,
+    routePreference: ['Shorter', 'Safer', 'LessSecure'].includes(routePreference) ? routePreference : 'Safer',
+    securityPenalty: Number.isFinite(Number(securityPenalty)) ? Math.min(100, Math.max(0, Math.round(Number(securityPenalty)))) : 50,
+    alwaysUseThera: alwaysUseThera === true,
+    alwaysUseTurnur: alwaysUseTurnur === true,
+    overrideGameRouting: overrideGameRouting === true,
+    defaultAvoidSystems: normalizeDefaultAvoidSystems(defaultAvoidSystemIds)
+  };
+  if ($('route-search')) {
+    $('theme-select').value = state.settings.theme;
+    $('route-progress-display').value = state.settings.routeProgressDisplay;
+    $('pilot-progress-sort').value = state.settings.pilotProgressSort;
+    $('auto-remove-complete').checked = state.settings.autoRemoveComplete;
+  }
+  applyAppearance();
+  return true;
+}
+
+async function reloadSharedState({ routes = false, characters = false, map = false, settings = new Set(), render = true } = {}) {
+  const [storedRoutes, storedCharacters] = await Promise.all([
+    routes ? store.getAll('routes') : null,
+    characters ? store.getAll('characters') : null
+  ]);
+  if (storedRoutes) state.routes = storedRoutes.map(normalizeRouteText);
+  if (storedCharacters) {
+    state.characters = storedCharacters.sort((left, right) => left.name.localeCompare(right.name));
+    if (!state.characters.some((character) => character.id === state.activeCharacterId)) {
+      state.activeCharacterId = state.characters.find(isCharacterOnline)?.id || state.characters[0]?.id || null;
+      if (state.activeCharacterId) sessionStorage.setItem(ACTIVE_CHARACTER_SESSION_KEY, String(state.activeCharacterId));
+      else sessionStorage.removeItem(ACTIVE_CHARACTER_SESSION_KEY);
+    }
+    if (state.mapper) state.mapper.activeCharacterId = state.activeCharacterId;
+  }
+  if (map) await state.mapper?.reload();
+  await reloadGlobalSettings(settings);
+  if (render && state.graph) renderAll();
+}
+
+async function applyExternalStoreChanges(changes) {
+  if (!appInitialized || !state.graph) return;
+  const kvKeys = changes.get('kv') || new Set();
+  if (changes.has('*')) return window.location.reload();
+  await reloadSharedState({
+    routes: changes.has('routes'),
+    characters: changes.has('characters'),
+    map: kvKeys.has('mapper-state'),
+    settings: kvKeys
+  });
+}
+
+async function handleCoordinatedRequest(method, args) {
+  if (!tabCoordinator.isLeader) throw new Error('This tab is not the active ESI leader.');
+  if (method.startsWith('esi:')) {
+    const esiMethod = method.slice(4);
+    const allowed = new Set(['characterLocation', 'characterOnline', 'characterShip', 'setWaypoint', 'setWaypoints']);
+    if (!allowed.has(esiMethod)) throw new Error(`Unsupported coordinated ESI method: ${esiMethod}`);
+    const result = await rawEsi[esiMethod](...(args || []));
+    return ['setWaypoint', 'setWaypoints'].includes(esiMethod) ? null : result;
+  }
+  if (method === 'app:refresh-character-presence') {
+    await reloadSharedState({ routes: true, characters: true, map: true, render: false });
+    const characterId = Number(args[0]);
+    const character = state.characters.find((candidate) => candidate.id === characterId);
+    if (!character) throw new Error('That character is no longer connected.');
+    await refreshCharacterPresence(character, true, args[1] !== false);
+    return { characterId };
+  }
+  if (method === 'app:refresh-all-locations') {
+    await reloadSharedState({ routes: true, characters: true, map: true, render: false });
+    const successes = await refreshAllLocations({ quiet: true });
+    return { refreshedAt: Date.now(), successes: Number(successes || 0) };
+  }
+  throw new Error(`Unsupported cross-tab request: ${method}`);
+}
+
 async function beginAuthorization() {
   try {
     await esi.beginAuthorization();
@@ -1136,7 +1300,50 @@ async function beginAuthorization() {
   }
 }
 
+const ESI_CHARACTER_FIELDS = Object.freeze([
+  'presence', 'onlineError', 'location', 'locationError', 'ship', 'shipError', 'routeProgress'
+]);
+
+async function persistEsiCharacter(character) {
+  const saved = await store.update('characters', character.id, (current) => {
+    if (!current) return current;
+    const next = { ...current };
+    ESI_CHARACTER_FIELDS.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(character, field)) next[field] = character[field];
+    });
+    return next;
+  }, null);
+  if (!saved) {
+    state.characters = state.characters.filter((candidate) => candidate.id !== character.id);
+    throw new Error('That character is no longer connected.');
+  }
+  const index = state.characters.findIndex((item) => item.id === character.id);
+  if (index >= 0) state.characters[index] = saved;
+  return saved;
+}
+
+async function persistCharacterRouting(characters) {
+  const saved = await Promise.all(characters.map((character) => (
+    store.update('characters', character.id, (current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        directRoute: character.directRoute,
+        routeProgress: character.routeProgress
+      };
+    }, null)
+  )));
+  return saved.filter(Boolean);
+}
+
 async function refreshCharacterPresence(character, quiet = false, advanceWaypoints = true) {
+  if (!tabCoordinator.isLeader) {
+    await tabCoordinator.request('app:refresh-character-presence', [character.id, advanceWaypoints]);
+    await reloadSharedState({ routes: true, characters: true, map: true, render: false });
+    const updated = state.characters.find((candidate) => candidate.id === character.id);
+    if (!updated) throw new Error('That character is no longer connected.');
+    return updated;
+  }
   try {
     const updated = await syncCharacterPresence(character, {
       getOnline: (characterId) => esi.characterOnline(characterId),
@@ -1151,19 +1358,14 @@ async function refreshCharacterPresence(character, quiet = false, advanceWaypoin
         ? await advancePilotWaypoint(updated, assignment)
         : { ...updated, routeProgress: assignment.progress }
       : updated;
-    await store.put('characters', tracked);
-    const index = state.characters.findIndex((item) => item.id === character.id);
-    if (index >= 0) state.characters[index] = tracked;
-    return tracked;
+    return persistEsiCharacter(tracked);
   } catch (error) {
     const updated = {
       ...character,
       presence: { ...(character.presence || {}), online: false, checkedAt: new Date().toISOString() },
       onlineError: error.message
     };
-    await store.put('characters', updated);
-    const index = state.characters.findIndex((item) => item.id === character.id);
-    if (index >= 0) state.characters[index] = updated;
+    await persistEsiCharacter(updated);
     if (!quiet) toast(`${character.name}: ${error.message}`, 'error');
     throw error;
   }
@@ -1174,19 +1376,14 @@ async function refreshCharacterOnline(character, quiet = false) {
     const updated = await syncCharacterOnline(character, {
       getOnline: (characterId) => esi.characterOnline(characterId)
     });
-    await store.put('characters', updated);
-    const index = state.characters.findIndex((item) => item.id === character.id);
-    if (index >= 0) state.characters[index] = updated;
-    return updated;
+    return persistEsiCharacter(updated);
   } catch (error) {
     const updated = {
       ...character,
       presence: { ...(character.presence || {}), online: false, checkedAt: new Date().toISOString() },
       onlineError: error.message
     };
-    await store.put('characters', updated);
-    const index = state.characters.findIndex((item) => item.id === character.id);
-    if (index >= 0) state.characters[index] = updated;
+    await persistEsiCharacter(updated);
     if (!quiet) toast(`${character.name}: ${error.message}`, 'error');
     throw error;
   }
@@ -1201,10 +1398,7 @@ async function refreshCharacterLocation(character) {
   });
   const assignment = assignedPilotProgress(updated);
   const tracked = assignment ? await advancePilotWaypoint(updated, assignment) : updated;
-  await store.put('characters', tracked);
-  const index = state.characters.findIndex((item) => item.id === character.id);
-  if (index >= 0) state.characters[index] = tracked;
-  return tracked;
+  return persistEsiCharacter(tracked);
 }
 
 function renderPilotData() {
@@ -1230,6 +1424,7 @@ function finishPilotSync() {
 }
 
 async function refreshOnlineStatuses() {
+  if (!tabCoordinator.isLeader) return;
   if (!state.characters.length) return;
   if (state.presenceSyncing) {
     state.onlineSyncPending = true;
@@ -1245,6 +1440,7 @@ async function refreshOnlineStatuses() {
 }
 
 async function refreshOnlineLocations() {
+  if (!tabCoordinator.isLeader) return;
   if (state.presenceSyncing) {
     state.locationSyncPending = true;
     return;
@@ -1268,6 +1464,23 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
     if (!quiet) toast('Connect an EVE character first.', 'error');
     return;
   }
+  if (!tabCoordinator.isLeader) {
+    setBusy(button, true, 'Syncing…');
+    try {
+      const result = await tabCoordinator.request('app:refresh-all-locations');
+      await reloadSharedState({ routes: true, characters: true, map: true, render: false });
+      renderPilotData();
+      const successes = Number(result?.successes || 0);
+      if (!quiet) toast(successes ? `Updated ${successes} pilot status${successes === 1 ? '' : 'es'}.` : 'No pilot statuses could be updated.', successes ? 'success' : 'error');
+      return successes;
+    } catch (error) {
+      if (quiet) console.warn('Pilot status refresh failed:', error);
+      else toast(error.message, 'error');
+      return 0;
+    } finally {
+      setBusy(button, false);
+    }
+  }
   if (state.presenceSyncing) return;
   state.presenceSyncing = true;
   setBusy(button, true, 'Syncing…');
@@ -1285,9 +1498,11 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
     if ($('route-detail').open && openDetail) openRouteDetail(openDetail);
     const successes = results.filter((result) => result.status === 'fulfilled').length;
     if (!quiet) toast(successes ? `Updated ${successes} pilot status${successes === 1 ? '' : 'es'}.` : 'No pilot statuses could be updated.', successes ? 'success' : 'error');
+    return successes;
   } catch (error) {
     if (quiet) console.warn('Pilot status refresh failed:', error);
     else toast(error.message, 'error');
+    return 0;
   } finally {
     finishPilotSync();
     setBusy(button, false);
@@ -2335,8 +2550,8 @@ async function clearSelectedPilotRoutes() {
       directRoute: null,
       routeProgress: null
     }));
-    await store.putMany('characters', changedCharacters);
-    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    const savedCharacters = await persistCharacterRouting(changedCharacters);
+    const characterChanges = new Map(savedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     renderAll();
   }
@@ -2375,8 +2590,8 @@ async function removePilotsFromRouteTracking(characterIds) {
     directRoute: null,
     routeProgress: null
   }));
-  await store.putMany('characters', changedCharacters);
-  const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+  const savedCharacters = await persistCharacterRouting(changedCharacters);
+  const characterChanges = new Map(savedCharacters.map((character) => [character.id, character]));
   state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
   ids.forEach((characterId) => state.progressDisplayOverrides.delete(characterId));
   return characters;
@@ -2516,8 +2731,8 @@ async function setAdHocRoute() {
         }
       };
     });
-    await store.putMany('characters', changedCharacters);
-    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    const savedCharacters = await persistCharacterRouting(changedCharacters);
+    const characterChanges = new Map(savedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     await autoRemoveCompletedPilots();
     renderAll();
@@ -2618,8 +2833,8 @@ async function saveRouteAssignments(event) {
         }
       };
     });
-    await store.putMany('characters', changedCharacters);
-    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    const savedCharacters = await persistCharacterRouting(changedCharacters);
+    const characterChanges = new Map(savedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     await autoRemoveCompletedPilots();
   }
@@ -2726,8 +2941,8 @@ async function sendRouteToAutopilot(route) {
         }
       };
     });
-    await store.putMany('characters', changedCharacters);
-    const characterChanges = new Map(changedCharacters.map((character) => [character.id, character]));
+    const savedCharacters = await persistCharacterRouting(changedCharacters);
+    const characterChanges = new Map(savedCharacters.map((character) => [character.id, character]));
     state.characters = state.characters.map((character) => characterChanges.get(character.id) || character);
     await autoRemoveCompletedPilots();
     renderRoutes();
@@ -2796,6 +3011,7 @@ async function removeCharacter(characterId) {
     state.activeCharacterId = null;
     if (nextCharacter) await switchActiveCharacter(nextCharacter.id);
     else {
+      sessionStorage.removeItem(ACTIVE_CHARACTER_SESSION_KEY);
       await store.setSetting('active-character-id', null);
       if (state.mapper) state.mapper.activeCharacterId = null;
     }
@@ -3363,12 +3579,6 @@ function bindEvents() {
     handleDefaultAvoidAction(() => setDefaultAvoidSystems(systems));
   });
   $('erase-data').addEventListener('click', eraseAllData);
-  window.addEventListener('storage', async () => {
-    state.routes = await repairEncodedRouteText(await store.getAll('routes'));
-    state.characters = await store.getAll('characters');
-    await state.mapper?.reload();
-    renderAll();
-  });
 }
 
 async function initialize() {
@@ -3413,12 +3623,17 @@ async function initialize() {
     state.graph = graph;
     state.routes = await repairEncodedRouteText(routes);
     state.characters = characters.sort((a, b) => a.name.localeCompare(b.name));
+    const sessionActiveCharacterId = Number(sessionStorage.getItem(ACTIVE_CHARACTER_SESSION_KEY));
+    const sessionActiveCharacter = state.characters.find((character) => character.id === sessionActiveCharacterId);
     const savedActiveCharacter = state.characters.find((character) => character.id === Number(activeCharacterId));
-    state.activeCharacterId = savedActiveCharacter?.id
+    state.activeCharacterId = sessionActiveCharacter?.id
+      || savedActiveCharacter?.id
       || state.characters.find(isCharacterOnline)?.id
       || state.characters[0]?.id
       || null;
-    if (state.activeCharacterId && state.activeCharacterId !== Number(activeCharacterId)) {
+    if (state.activeCharacterId) sessionStorage.setItem(ACTIVE_CHARACTER_SESSION_KEY, String(state.activeCharacterId));
+    else sessionStorage.removeItem(ACTIVE_CHARACTER_SESSION_KEY);
+    if (!sessionActiveCharacter && state.activeCharacterId && state.activeCharacterId !== Number(activeCharacterId)) {
       await store.setSetting('active-character-id', state.activeCharacterId);
     }
     state.settings = {
@@ -3473,7 +3688,9 @@ async function initialize() {
         console.warn('Could not preload live EVE-Scout connections:', error);
       }
     }
-    if (state.characters.length) refreshAllLocations({ quiet: true });
+    appInitialized = true;
+    tabCoordinator.start();
+    flushExternalStoreChanges();
     state.onlineTimer = window.setInterval(refreshOnlineStatuses, ONLINE_REFRESH_MS);
     state.locationTimer = window.setInterval(refreshOnlineLocations, LOCATION_REFRESH_MS);
   } catch (error) {
@@ -3482,5 +3699,10 @@ async function initialize() {
     toast(error.message, 'error');
   }
 }
+
+window.addEventListener('pagehide', () => tabCoordinator.stop());
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && appInitialized) tabCoordinator.start();
+});
 
 if (!redirectToLocalhost) initialize();

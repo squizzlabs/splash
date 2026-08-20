@@ -64,6 +64,7 @@ export class ESIClient {
   constructor(store) {
     this.store = store;
     this.metadataPromise = null;
+    this.tokenRefreshes = new Map();
   }
 
   async metadata() {
@@ -192,7 +193,7 @@ export class ESIClient {
     if (!Number.isSafeInteger(characterId) || characterId <= 0) throw new Error('The EVE access token did not identify a character.');
     const scopes = Array.isArray(claims.scp) ? claims.scp : String(claims.scp || '').split(/\s+/).filter(Boolean);
     const existing = await this.store.get('characters', characterId);
-    const character = {
+    const authorizedCharacter = {
       ...existing,
       id: characterId,
       name: claims.name || existing?.name || `Character ${characterId}`,
@@ -203,7 +204,19 @@ export class ESIClient {
       addedAt: existing?.addedAt || Date.now(),
       authorizedAt: Date.now()
     };
-    await this.store.put('characters', character);
+    const character = typeof this.store.update === 'function'
+      ? await this.store.update('characters', characterId, (current) => ({
+          ...(current || {}),
+          id: authorizedCharacter.id,
+          name: authorizedCharacter.name,
+          accessToken: authorizedCharacter.accessToken,
+          refreshToken: authorizedCharacter.refreshToken,
+          expiresAt: authorizedCharacter.expiresAt,
+          scopes: authorizedCharacter.scopes,
+          addedAt: current?.addedAt || authorizedCharacter.addedAt,
+          authorizedAt: authorizedCharacter.authorizedAt
+        }), authorizedCharacter)
+      : await this.store.put('characters', authorizedCharacter);
     ['state', 'verifier', 'clientId'].forEach((key) => sessionStorage.removeItem(`${OAUTH_PREFIX}${key}`));
     return character;
   }
@@ -213,6 +226,18 @@ export class ESIClient {
     if (!character) throw new Error('That character is no longer connected.');
     if (!forceRefresh && character.accessToken && character.expiresAt > Date.now()) return character.accessToken;
     if (!character.refreshToken) throw new Error(`${character.name} must be connected again.`);
+    const id = Number(characterId);
+    if (this.tokenRefreshes.has(id)) return this.tokenRefreshes.get(id);
+    const refresh = this.refreshAccessToken(character);
+    this.tokenRefreshes.set(id, refresh);
+    try {
+      return await refresh;
+    } finally {
+      if (this.tokenRefreshes.get(id) === refresh) this.tokenRefreshes.delete(id);
+    }
+  }
+
+  async refreshAccessToken(character) {
     const clientId = await this.clientId();
     const token = await this.requestToken({
       grant_type: 'refresh_token',
@@ -220,15 +245,21 @@ export class ESIClient {
       client_id: clientId
     });
     const claims = await this.validateAccessToken(token.access_token, clientId);
-    const updated = {
-      ...character,
+    const auth = {
       accessToken: token.access_token,
       refreshToken: token.refresh_token || character.refreshToken,
       expiresAt: Date.now() + (Math.max(60, Number(token.expires_in || 1200)) - 30) * 1000,
       scopes: Array.isArray(claims.scp) ? claims.scp : String(claims.scp || '').split(/\s+/).filter(Boolean)
     };
-    await this.store.put('characters', updated);
-    return updated.accessToken;
+    if (typeof this.store.update === 'function') {
+      const updated = await this.store.update('characters', character.id, (current) => (
+        current ? { ...current, ...auth } : current
+      ), null);
+      if (!updated) throw new Error('That character is no longer connected.');
+    } else {
+      await this.store.put('characters', { ...character, ...auth });
+    }
+    return auth.accessToken;
   }
 
   async request(path, options = {}) {

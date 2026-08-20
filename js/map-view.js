@@ -16,6 +16,7 @@ import {
 
 const MAP_STATE_KEY = 'mapper-state';
 const MAP_VIEWPORT_KEY = 'mapper-viewport';
+const MAP_VIEWPORT_SESSION_KEY = 'splash:mapper-viewport';
 const NODE_WIDTH = 176;
 const NODE_HEIGHT = 72;
 const SIGNATURE_ID_PATTERN = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/;
@@ -79,6 +80,7 @@ export class MapperView {
     this.jumpPromptQueue = [];
     this.activeJumpPrompt = null;
     this.editingSignature = null;
+    this.editingConnectionId = null;
   }
 
   async init() {
@@ -87,19 +89,44 @@ export class MapperView {
       this.store.getSetting(MAP_VIEWPORT_KEY, null)
     ]);
     this.map = normalizeMapState(savedMap, this.graph);
-    const scale = Number(savedViewport?.scale);
+    let sessionViewport = null;
+    try {
+      sessionViewport = JSON.parse(sessionStorage.getItem(MAP_VIEWPORT_SESSION_KEY) || 'null');
+    } catch (_) {
+      sessionViewport = null;
+    }
+    const scale = Number(sessionViewport?.scale ?? savedViewport?.scale);
     this.rememberedScale = Number.isFinite(scale) ? Math.min(2.4, Math.max(.28, scale)) : null;
     this.bindEvents();
     this.render();
   }
 
   async reload() {
-    this.map = normalizeMapState(await this.store.getSetting(MAP_STATE_KEY, null), this.graph);
+    const previousConnectionIds = new Set(this.map.connections.map((connection) => connection.id));
+    const selectedSystemId = this.map.selectedSystemId;
+    const latest = normalizeMapState(await this.store.getSetting(MAP_STATE_KEY, null), this.graph);
+    this.map = latest.nodes.some((node) => node.id === selectedSystemId)
+      ? { ...latest, selectedSystemId }
+      : latest;
     this.render(this.characters);
-  }
-
-  async save() {
-    await this.store.setSetting(MAP_STATE_KEY, this.map);
+    if (this.editingConnectionId && !this.map.connections.some((connection) => connection.id === this.editingConnectionId)) {
+      document.getElementById('map-connection-dialog')?.close();
+      this.editingConnectionId = null;
+    }
+    const newTrackedJumps = this.map.connections
+      .filter((connection) => connection.kind === 'wormhole'
+        && connection.source === 'tracked'
+        && !connection.fromSignature
+        && !previousConnectionIds.has(connection.id))
+      .map((connection) => ({
+        type: 'wormhole-jump',
+        from: connection.from,
+        to: connection.to,
+        connectionId: connection.id,
+        characterId: null
+      }));
+    if (this.activeJumpPrompt && this.connectionSignatureForJump(this.activeJumpPrompt)) this.finishJumpPrompt();
+    this.queueJumpPrompts(newTrackedJumps);
   }
 
   render(characters = this.characters) {
@@ -118,7 +145,6 @@ export class MapperView {
       : preferredMapRoot(visibleMap, activeCharacter ? [activeCharacter] : this.characters);
     if (this.layoutRootId && !visibleIds.has(Number(this.map.selectedSystemId))) {
       this.map = { ...this.map, selectedSystemId: this.layoutRootId };
-      this.save().catch((error) => this.toast(error.message, 'error'));
     }
     this.positions = computeChainLayout(this.visibleNodes, this.visibleConnections, this.layoutRootId);
     this.renderToolbar();
@@ -173,6 +199,11 @@ export class MapperView {
       let endX;
       let endY;
       let path;
+      const fromSystem = this.graph.get(connection.from);
+      const toSystem = this.graph.get(connection.to);
+      const interaction = connection.kind === 'gate'
+        ? ''
+        : `data-map-connection="${connection.id}" role="button" tabindex="0" aria-label="Edit wormhole connection between ${svgEscape(fromSystem?.name || connection.from)} and ${svgEscape(toSystem?.name || connection.to)}"`;
       if (from.depth !== to.depth) {
         const parent = from.depth < to.depth ? from : to;
         const child = from.depth < to.depth ? to : from;
@@ -192,7 +223,7 @@ export class MapperView {
         const direction = leftToRight ? 1 : -1;
         path = `M ${startX} ${startY} C ${startX + bend * direction} ${startY}, ${endX - bend * direction} ${endY}, ${endX} ${endY}`;
       }
-      return `<g class="map-connection-group ${connection.life === 'eol' ? 'is-eol' : ''} is-mass-${connection.mass} is-size-${connection.size}" data-map-connection="${connection.id}">
+      return `<g class="map-connection-group ${connection.life === 'eol' ? 'is-eol' : ''} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
         <path class="map-connection-hit" d="${path}"></path>
         <path class="map-connection-line" d="${path}"></path>
       </g>`;
@@ -339,6 +370,11 @@ export class MapperView {
     this.rememberedScale = this.viewport.scale;
     window.clearTimeout(this.viewportSaveTimer);
     this.viewportSaveTimer = window.setTimeout(() => {
+      try {
+        sessionStorage.setItem(MAP_VIEWPORT_SESSION_KEY, JSON.stringify({ scale: this.rememberedScale }));
+      } catch (_) {
+        // IndexedDB remains the persistence fallback when session storage is unavailable.
+      }
       this.store.setSetting(MAP_VIEWPORT_KEY, { scale: this.rememberedScale })
         .catch((error) => this.toast(error.message, 'error'));
     }, 180);
@@ -366,14 +402,27 @@ export class MapperView {
   async observeCharacters(characters) {
     this.characters = characters;
     const previousSelection = this.map.selectedSystemId;
-    const result = observeCharacterMovements(this.map, characters, this.graph);
-    if (result.map !== this.map) {
-      this.map = result.map;
-      await this.save();
+    let changes = [];
+    let changed = false;
+    this.map = await this.store.updateSetting(MAP_STATE_KEY, (storedMap) => {
+      const latest = normalizeMapState(storedMap, this.graph);
+      const current = latest.nodes.some((node) => node.id === previousSelection)
+        ? { ...latest, selectedSystemId: previousSelection }
+        : latest;
+      const result = observeCharacterMovements(current, characters, this.graph);
+      changes = result.changes;
+      changed = result.map !== current;
+      return changed ? result.map : storedMap || current;
+    }, null);
+    this.map = normalizeMapState(this.map, this.graph);
+    if (this.map.nodes.some((node) => node.id === previousSelection)) {
+      this.map = { ...this.map, selectedSystemId: previousSelection };
+    }
+    if (changed) {
       this.render();
       if (this.map.selectedSystemId !== previousSelection) this.onSystemSelected(this.map.selectedSystemId);
-      if (result.changes.some((change) => change.type === 'connection')) this.toast('New non-gate connection added to the map.');
-      this.queueJumpPrompts(result.changes.filter((change) => change.type === 'wormhole-jump'));
+      if (changes.some((change) => change.type === 'connection')) this.toast('New non-gate connection added to the map.');
+      this.queueJumpPrompts(changes.filter((change) => change.type === 'wormhole-jump'));
     } else {
       this.renderGraph();
     }
@@ -390,6 +439,7 @@ export class MapperView {
   queueJumpPrompts(jumps) {
     jumps.forEach((jump) => {
       if (this.connectionSignatureForJump(jump)) return;
+      if (!wormholeSignatureCandidates(this.map, jump.from, jump.connectionId).length) return;
       const key = `${jump.connectionId}:${jump.from}`;
       const duplicate = this.activeJumpPrompt?.key === key || this.jumpPromptQueue.some((candidate) => candidate.key === key);
       if (!duplicate) this.jumpPromptQueue.push({ ...jump, key });
@@ -408,13 +458,14 @@ export class MapperView {
       const to = this.graph.get(jump.to);
       const character = this.characters.find((candidate) => Number(candidate.id) === jump.characterId);
       const signatures = wormholeSignatureCandidates(this.map, jump.from, jump.connectionId);
+      if (!signatures.length) continue;
       const options = document.getElementById('map-jump-signatures');
       document.getElementById('map-jump-message').textContent = `${character?.name || 'A tracked pilot'} made a non-gate jump. Select the signature used in ${from?.name || 'the origin system'} so this connection is labeled correctly.`;
       document.getElementById('map-jump-route').innerHTML = `<span><small>From</small><strong>${svgEscape(from?.name || jump.from)}</strong></span><b aria-hidden="true">→</b><span><small>To</small><strong>${svgEscape(to?.name || jump.to)}</strong></span>`;
-      options.innerHTML = signatures.length ? signatures.map((signature, index) => {
+      options.innerHTML = signatures.map((signature, index) => {
         const detail = signature.type || signature.name || 'Wormhole';
         return `<label class="map-jump-option"><input type="radio" name="map-jump-signature" value="${svgEscape(signature.id)}" ${signatures.length === 1 && index === 0 ? 'checked' : ''}><span><strong>${svgEscape(signature.id)}</strong><small title="${svgEscape(detail)}">${svgEscape(detail)}</small></span></label>`;
-      }).join('') : '<p class="map-jump-no-signatures">No scanned wormhole signatures are available here. Enter the signature ID below, or skip and label the connection later.</p>';
+      }).join('');
       const manual = document.getElementById('map-jump-signature-manual');
       manual.value = '';
       this.activeJumpPrompt = jump;
@@ -448,9 +499,7 @@ export class MapperView {
       return;
     }
     const jump = this.activeJumpPrompt;
-    this.map = assignConnectionSignature(this.map, jump.connectionId, jump.from, signatureId);
-    await this.save();
-    this.render();
+    await this.mutate((map) => assignConnectionSignature(map, jump.connectionId, jump.from, signatureId));
     this.toast(`${signatureId} mapped to the ${this.graph.get(jump.from)?.name || 'origin'} connection.`);
     this.finishJumpPrompt();
   }
@@ -490,8 +539,13 @@ export class MapperView {
 
   async mutate(mutator, { fit = false } = {}) {
     const previousSelection = this.map.selectedSystemId;
-    this.map = mutator(this.map);
-    await this.save();
+    this.map = await this.store.updateSetting(MAP_STATE_KEY, (storedMap) => {
+      const latest = normalizeMapState(storedMap, this.graph);
+      const current = latest.nodes.some((node) => node.id === previousSelection)
+        ? { ...latest, selectedSystemId: previousSelection }
+        : latest;
+      return normalizeMapState(mutator(current), this.graph);
+    }, null);
     this.render();
     if (this.map.selectedSystemId !== previousSelection) this.onSystemSelected(this.map.selectedSystemId);
     if (fit) requestAnimationFrame(() => this.fit({ preferredScale: this.rememberedScale }));
@@ -503,7 +557,6 @@ export class MapperView {
     const changed = this.map.selectedSystemId !== id;
     if (changed) this.editingSignature = null;
     this.map = { ...this.map, selectedSystemId: id };
-    this.save().catch((error) => this.toast(error.message, 'error'));
     this.render();
     if (notify && changed) this.onSystemSelected(id);
     return true;
@@ -515,6 +568,49 @@ export class MapperView {
     this.editingSignature = sameSignature ? null : { systemId: this.map.selectedSystemId, id };
     this.renderInspector();
     if (!sameSignature) requestAnimationFrame(() => document.querySelector('[data-map-signature-edit-form] input[name="id"]')?.select());
+  }
+
+  openConnectionEditor(connectionId) {
+    const connection = this.map.connections.find((candidate) => candidate.id === String(connectionId));
+    const dialog = document.getElementById('map-connection-dialog');
+    if (!connection || connection.kind === 'gate' || !dialog) return false;
+    const from = this.graph.get(connection.from);
+    const to = this.graph.get(connection.to);
+    this.editingConnectionId = connection.id;
+    document.getElementById('map-connection-title').textContent = 'Edit wormhole';
+    document.getElementById('map-connection-systems').textContent = `${from?.name || connection.from} ↔ ${to?.name || connection.to}`;
+    document.getElementById('map-connection-life').value = connection.life;
+    document.getElementById('map-connection-mass').value = connection.mass;
+    document.getElementById('map-connection-size').value = connection.size;
+    dialog.showModal();
+    requestAnimationFrame(() => document.getElementById('map-connection-life')?.focus());
+    return true;
+  }
+
+  async saveConnectionEditor() {
+    const connectionId = this.editingConnectionId;
+    if (!connectionId) return false;
+    const life = document.getElementById('map-connection-life').value;
+    const mass = document.getElementById('map-connection-mass').value;
+    const size = document.getElementById('map-connection-size').value;
+    if (!['stable', 'eol'].includes(life)
+      || !['stable', 'reduced', 'critical'].includes(mass)
+      || !['frigate', 'small', 'medium', 'large', 'xlarge'].includes(size)) {
+      this.toast('Choose a valid wormhole condition.', 'error');
+      return false;
+    }
+    const updatedAt = new Date().toISOString();
+    await this.mutate((map) => ({
+      ...map,
+      connections: map.connections.map((connection) => connection.id === connectionId
+        ? { ...connection, life, mass, size, updatedAt }
+        : connection),
+      updatedAt
+    }));
+    document.getElementById('map-connection-dialog')?.close();
+    this.editingConnectionId = null;
+    this.toast('Wormhole condition updated.');
+    return true;
   }
 
   bindEvents() {
@@ -530,6 +626,13 @@ export class MapperView {
     document.getElementById('map-jump-dialog')?.addEventListener('cancel', (event) => {
       event.preventDefault();
       this.finishJumpPrompt();
+    });
+    document.getElementById('map-connection-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveConnectionEditor().catch((error) => this.toast(error.message, 'error'));
+    });
+    document.getElementById('map-connection-dialog')?.addEventListener('close', () => {
+      this.editingConnectionId = null;
     });
     document.getElementById('map-jump-signatures')?.addEventListener('change', () => {
       const manual = document.getElementById('map-jump-signature-manual');
@@ -548,7 +651,7 @@ export class MapperView {
       this.zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX, event.clientY);
     }, { passive: false });
     svg?.addEventListener('pointerdown', (event) => {
-      if (event.target.closest('[data-map-system]')) return;
+      if (event.target.closest('[data-map-system], [data-map-connection]')) return;
       this.panning = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: this.viewport.x, originY: this.viewport.y };
       svg.setPointerCapture(event.pointerId);
       svg.classList.add('is-panning');
@@ -567,11 +670,18 @@ export class MapperView {
     svg?.addEventListener('pointerup', stopPan);
     svg?.addEventListener('pointercancel', stopPan);
     svg?.addEventListener('click', (event) => {
+      const connection = event.target.closest('[data-map-connection]');
+      if (connection) return this.openConnectionEditor(connection.dataset.mapConnection);
       const node = event.target.closest('[data-map-system]');
       if (!node) return;
       this.selectSystem(node.dataset.mapSystem);
     });
     svg?.addEventListener('keydown', (event) => {
+      const connection = event.target.closest('[data-map-connection]');
+      if (connection && ['Enter', ' '].includes(event.key)) {
+        event.preventDefault();
+        return this.openConnectionEditor(connection.dataset.mapConnection);
+      }
       const node = event.target.closest('[data-map-system]');
       if (!node || !['Enter', ' '].includes(event.key)) return;
       event.preventDefault();
