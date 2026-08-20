@@ -5,6 +5,7 @@ import {
   addMapSystem,
   assignConnectionSignature,
   connectedMapSystemIds,
+  connectionLifeExpiresAt,
   computeChainLayout,
   emptyMapState,
   fitChainViewport,
@@ -14,7 +15,10 @@ import {
   observeCharacterMovements,
   parseScannerSignatures,
   preferredMapRoot,
+  pruneExpiredConnections,
+  removeMapConnection,
   removeMapSystem,
+  updateConnectionCondition,
   updateMapSignature,
   upsertSignatures,
   wormholeSignatureCandidates
@@ -97,10 +101,35 @@ test('removing a system also removes attached connections and signatures', () =>
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
   map = upsertSignatures(map, 3, [{ id: 'ABC-123', group: 'Wormhole' }], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'OUT-456', now);
   map = removeMapSystem(map, 3, now);
   assert.deepEqual(map.nodes.map((node) => node.id), [1]);
   assert.equal(map.connections.length, 0);
   assert.equal(map.signatures[3], undefined);
+  assert.deepEqual(map.signatures[1], []);
+});
+
+test('removing a connection removes its assigned signatures from both systems', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'KEP-001', group: 'Data Site' }], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA-111', now);
+  map = assignConnectionSignature(map, '1:3', 3, 'BBB-222', now);
+  map = removeMapConnection(map, '1:3', now);
+  assert.equal(map.connections.length, 0);
+  assert.deepEqual(map.signatures[1].map((signature) => signature.id), ['KEP-001']);
+  assert.deepEqual(map.signatures[3], []);
+});
+
+test('connection cleanup preserves a signature still referenced by another connection', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = addMapSystem(map, systems.get(4), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA-111', now);
+  map = assignConnectionSignature(map, '1:4', 1, 'AAA-111', now);
+  map = removeMapConnection(map, '1:3', now);
+  assert.equal(map.connections.length, 1);
+  assert.equal(map.signatures[1][0].id, 'AAA-111');
 });
 
 test('scanner paste accepts EVE tab-separated rows and ignores unrelated text', () => {
@@ -214,13 +243,52 @@ test('a three-letter custom signature can be assigned to a connection', () => {
   assert.equal(map.signatures[1][0].group, 'Wormhole');
 });
 
+test('wormhole lifetime changes set and preserve the correct deletion deadlines', () => {
+  const base = { life: 'stable', mass: 'stable', size: 'medium', expiresAt: null };
+  const underFour = updateConnectionCondition(base, { life: 'under-4h' }, now);
+  assert.equal(underFour.expiresAt, '2026-08-20T16:00:00.000Z');
+  const massOnly = updateConnectionCondition(underFour, { mass: 'critical' }, () => '2026-08-20T13:00:00.000Z');
+  assert.equal(massOnly.expiresAt, underFour.expiresAt);
+  const underOne = updateConnectionCondition(massOnly, { life: 'under-1h' }, () => '2026-08-20T13:00:00.000Z');
+  assert.equal(underOne.expiresAt, '2026-08-20T14:00:00.000Z');
+  const expired = updateConnectionCondition(underOne, { life: 'expired' }, now);
+  assert.equal(expired.expiresAt, '2026-08-20T12:30:00.000Z');
+  assert.equal(connectionLifeExpiresAt('stable', now), null);
+  assert.equal(updateConnectionCondition(expired, { life: 'stable' }, now).expiresAt, null);
+});
+
+test('legacy end-of-life connections migrate to the under-four-hour timer', () => {
+  const map = normalizeMapState({
+    nodes: [{ id: 1 }, { id: 3 }],
+    connections: [{ from: 1, to: 3, life: 'eol', updatedAt: now() }]
+  }, graph);
+  assert.equal(map.connections[0].life, 'under-4h');
+  assert.equal(map.connections[0].expiresAt, '2026-08-20T16:00:00.000Z');
+});
+
+test('expired deadlines remove the connection and its assigned signature', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA', now);
+  map.connections[0] = {
+    ...map.connections[0],
+    life: 'expired',
+    expiresAt: '2026-08-20T12:30:00.000Z'
+  };
+  assert.deepEqual(mapRoutingConnections(map, graph, now), []);
+  const pruned = pruneExpiredConnections(map, () => '2026-08-20T12:30:00.000Z');
+  assert.equal(pruned.connections.length, 0);
+  assert.deepEqual(pruned.nodes.map((node) => node.id), [1, 3]);
+  assert.deepEqual(pruned.signatures[1], []);
+});
+
 test('mapped wormholes become direction-specific routing edges and instructions', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
   map = assignConnectionSignature(map, '1:3', 1, 'AAA', now);
-  map.connections[0] = { ...map.connections[0], type: 'K162', life: 'eol', mass: 'reduced', size: 'medium' };
+  map.connections[0] = { ...map.connections[0], type: 'K162', life: 'under-1h', expiresAt: '2026-08-20T13:00:00.000Z', mass: 'reduced', size: 'medium' };
 
-  const forwardOnly = mapRoutingConnections(map, graph);
+  const forwardOnly = mapRoutingConnections(map, graph, now);
   assert.deepEqual(forwardOnly.map(({ from, to }) => [from.id, to.id]), [[1, 3]]);
   const routingGraph = new UniverseGraph({
     schemaVersion: 1,
@@ -230,9 +298,9 @@ test('mapped wormholes become direction-specific routing edges and instructions'
       [3, 'J123456', -1, 1, 100, 0, 0, []]
     ]
   });
-  assert.deepEqual(routingGraph.astar(1, 3, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph) }), [1, 3]);
-  assert.throws(() => routingGraph.astar(3, 1, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph) }), /No known route/);
-  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(1), systems.get(3)])[0], {
+  assert.deepEqual(routingGraph.astar(1, 3, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph, now) }), [1, 3]);
+  assert.throws(() => routingGraph.astar(3, 1, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph, now) }), /No known route/);
+  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(1), systems.get(3)], now)[0], {
     id: 'map:1:3',
     key: 'wormhole:map:1:3:0:1',
     source: 'map',
@@ -243,16 +311,16 @@ test('mapped wormholes become direction-specific routing edges and instructions'
     toIndex: 1,
     signatureId: 'AAA',
     destinationSignatureId: '',
-    expiresAt: null,
+    expiresAt: '2026-08-20T13:00:00.000Z',
     maxShipSize: 'medium',
     wormholeType: 'K162',
-    life: 'eol',
+    life: 'under-1h',
     mass: 'reduced'
   });
-  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(3), systems.get(1)]), []);
+  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(3), systems.get(1)], now), []);
 
   map = assignConnectionSignature(map, '1:3', 3, 'BBB-222', now);
-  assert.deepEqual(mapRoutingConnections(map, graph).map(({ from, to }) => [from.id, to.id]), [[1, 3], [3, 1]]);
+  assert.deepEqual(mapRoutingConnections(map, graph, now).map(({ from, to }) => [from.id, to.id]), [[1, 3], [3, 1]]);
 });
 
 test('chain layout puts the root on top and adjacent branches below', () => {

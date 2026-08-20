@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-app-state="loading">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -32,14 +32,14 @@
   <link rel="stylesheet" href="./css/app.css">
   <script type="module" src="./js/app.js"></script>
 </head>
-<body>
+<body aria-busy="true">
   <header class="topbar">
     <a class="brand" href="./" aria-label="Splash home">
       <img class="brand-mark" src="./images/whpd-wormhole.svg" alt="">
       <span class="brand-type"><span>SPLASH</span></span>
     </a>
     <nav class="main-nav" aria-label="Primary">
-      <button class="nav-item is-active" type="button" data-view-target="routes">
+      <button class="nav-item" type="button" data-view-target="routes">
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M12 21v-8"></path><path d="m12 14-6-6"></path><path d="M6 12V8h4"></path><path d="m12 14 6-6"></path><path d="M14 8h4v4"></path></svg>
         </span> Routes
@@ -67,8 +67,8 @@
     </div>
   </header>
 
-  <main class="app-shell">
-    <section id="view-routes" class="app-view is-active" data-view="routes">
+  <main class="app-shell" hidden>
+    <section id="view-routes" class="app-view" data-view="routes" hidden>
       <section class="route-board" aria-labelledby="route-board-title">
         <div class="route-board-grid">
           <section class="route-board-column" aria-labelledby="route-board-title">
@@ -150,7 +150,9 @@
             </div>
             <div class="map-legend" aria-label="Connection legend">
               <span><i class="is-stable"></i> stable</span>
-              <span><i class="is-eol"></i> end of life</span>
+              <span><i class="is-under-4h"></i> &lt;4h</span>
+              <span><i class="is-under-1h"></i> &lt;1h</span>
+              <span><i class="is-expired"></i> expired</span>
               <span><i class="is-critical"></i> critical mass</span>
             </div>
           </div>
@@ -288,7 +290,7 @@
     </section>
   </main>
 
-  <footer class="app-footer">
+  <footer class="app-footer" hidden>
     <span><strong>Splash</strong> · Getting lost is optional.</span>
     <span class="app-footer-links">
       <a href="https://github.com/squizzlabs/splash" target="_blank" rel="noopener noreferrer" aria-label="View Splash source code on GitHub" title="View Splash source code on GitHub">
@@ -630,12 +632,15 @@
       <div class="modal-body">
         <p id="map-connection-systems" class="map-connection-systems"></p>
         <div class="map-connection-condition-grid">
-          <label><span>Lifetime</span><select id="map-connection-life"><option value="stable">Stable</option><option value="eol">End of life</option></select></label>
+          <label><span>Lifetime</span><select id="map-connection-life"><option value="stable">Stable</option><option value="under-4h">&lt;4 hours</option><option value="under-1h">&lt;1 hour</option><option value="expired">Expired</option></select></label>
           <label><span>Mass remaining</span><select id="map-connection-mass"><option value="stable">Stable</option><option value="reduced">Reduced</option><option value="critical">Critical</option></select></label>
           <label><span>Maximum ship size</span><select id="map-connection-size"><option value="frigate">Frigate</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="xlarge">XL</option></select></label>
         </div>
+        <p id="map-connection-expiry" class="map-connection-expiry" role="timer" aria-atomic="true"></p>
       </div>
       <div class="modal-footer">
+        <button id="map-connection-delete" class="button button-danger-ghost" type="button">Delete connection</button>
+        <span class="footer-spacer"></span>
         <button class="button button-ghost" type="button" data-close-dialog="map-connection-dialog">Cancel</button>
         <button class="button button-primary" type="submit">Save condition</button>
       </div>

@@ -462,11 +462,21 @@ function showView(name, { updateHash = true, replaceHash = false, scrollBehavior
     view.classList.toggle('is-active', active);
   });
   document.querySelectorAll('[data-view-target]').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.viewTarget === viewName);
+    const active = button.dataset.viewTarget === viewName;
+    button.classList.toggle('is-active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
   });
   window.scrollTo({ top: 0, behavior: scrollBehavior });
   if (viewName === 'map') state.mapper?.activate();
   if (updateHash) writeViewHash(viewHash(viewName, state.mapper?.map.selectedSystemId), { replace: replaceHash });
+}
+
+function revealInitializedApp() {
+  document.querySelector('.app-shell')?.removeAttribute('hidden');
+  document.querySelector('.app-footer')?.removeAttribute('hidden');
+  document.documentElement.dataset.appState = 'ready';
+  document.body.setAttribute('aria-busy', 'false');
 }
 
 function restoreViewFromHash({ canonicalize = true } = {}) {
@@ -735,8 +745,13 @@ function wormholeInstructionMarkup(wormhole, assignment) {
     : atHole
       ? `<span>Warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`
       : `<span>At</span><strong>${escapeHtml(wormhole.from.name)}</strong><span>warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`;
+  const lifeLabel = wormhole.life === 'expired'
+    ? 'expired'
+    : wormhole.life === 'under-1h'
+      ? 'under 1 hour'
+      : ['under-4h', 'eol'].includes(wormhole.life) ? 'under 4 hours' : 'stable life';
   const details = wormhole.source === 'map'
-    ? `Mapped · ${wormhole.wormholeType} · ${wormhole.life === 'eol' ? 'end of life' : 'stable life'} · ${wormhole.mass === 'critical' ? 'critical mass' : wormhole.mass === 'reduced' ? 'reduced mass' : 'stable mass'} · max ${wormhole.maxShipSize}`
+    ? `Mapped · ${wormhole.wormholeType} · ${lifeLabel} · ${wormhole.mass === 'critical' ? 'critical mass' : wormhole.mass === 'reduced' ? 'reduced mass' : 'stable mass'} · max ${wormhole.maxShipSize}`
     : `${wormhole.wormholeType} · max ${wormhole.maxShipSize} · ${formatTimeRemaining(wormhole.expiresAt)}`;
   return `<div class="pilot-wormhole-stop ${isActive ? 'is-active' : ''} ${expired ? 'is-expired' : ''}">
     <img class="pilot-wormhole-symbol" src="./images/whpd-wormhole.svg" alt="" title="Wormhole">
@@ -3665,7 +3680,6 @@ async function initialize() {
     });
     await state.mapper.init();
     prepareSystemAutocomplete();
-    bindEvents();
     await autoRemoveCompletedPilots({ notify: false });
     renderAll();
     const params = new URLSearchParams(window.location.search);
@@ -3675,7 +3689,6 @@ async function initialize() {
       cleanUrl.searchParams.delete('authorized');
       history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
     }
-    restoreViewFromHash();
     const hasWormholeRoute = alwaysWormholeHubs().length
       || state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)
       || state.characters.some((character) => normalizeWormholeHubs(character.directRoute?.wormholeHubs).length);
@@ -3688,7 +3701,10 @@ async function initialize() {
         console.warn('Could not preload live EVE-Scout connections:', error);
       }
     }
+    restoreViewFromHash();
+    bindEvents();
     appInitialized = true;
+    revealInitializedApp();
     tabCoordinator.start();
     flushExternalStoreChanges();
     state.onlineTimer = window.setInterval(refreshOnlineStatuses, ONLINE_REFRESH_MS);
@@ -3696,6 +3712,8 @@ async function initialize() {
   } catch (error) {
     console.error(error);
     $('routes-list').innerHTML = `<div class="empty-state"><h3>Splash could not start</h3><p>${escapeHtml(error.message)}</p></div>`;
+    showView('routes', { updateHash: false, scrollBehavior: 'auto' });
+    revealInitializedApp();
     toast(error.message, 'error');
   }
 }

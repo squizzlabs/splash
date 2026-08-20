@@ -433,7 +433,9 @@ export function buildRoute(input, previous = null) {
         expiresAt: Number.isFinite(parsedExpiration) ? new Date(parsedExpiration).toISOString() : null,
         maxShipSize: String(step.maxShipSize || 'unknown'),
         wormholeType: String(step.wormholeType || 'Unknown'),
-        life: step.life === 'eol' ? 'eol' : 'stable',
+        life: step.life === 'eol'
+          ? 'under-4h'
+          : ['under-4h', 'under-1h', 'expired'].includes(step.life) ? step.life : 'stable',
         mass: ['reduced', 'critical'].includes(step.mass) ? step.mass : 'stable'
       };
     });

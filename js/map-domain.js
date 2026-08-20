@@ -1,6 +1,13 @@
 const MAP_VERSION = 1;
 const SCANNER_SIGNATURE_ID = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/i;
 const SIGNATURE_REFERENCE = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/i;
+const WORMHOLE_LIFE_STATES = ['stable', 'under-4h', 'under-1h', 'expired'];
+
+export const WORMHOLE_LIFE_DURATIONS = Object.freeze({
+  'under-4h': 4 * 60 * 60 * 1_000,
+  'under-1h': 60 * 60 * 1_000,
+  expired: 30 * 60 * 1_000
+});
 
 function isoNow(now) {
   return typeof now === 'function' ? now() : new Date().toISOString();
@@ -8,6 +15,46 @@ function isoNow(now) {
 
 function cleanText(value, limit = 120) {
   return String(value || '').trim().slice(0, limit);
+}
+
+function millisecondsNow(now = Date.now()) {
+  const value = typeof now === 'function' ? now() : now;
+  const timestamp = typeof value === 'number' ? value : Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+export function normalizeConnectionLife(value) {
+  if (value === 'eol') return 'under-4h';
+  return WORMHOLE_LIFE_STATES.includes(value) ? value : 'stable';
+}
+
+export function connectionLifeExpiresAt(life, now = Date.now()) {
+  const normalizedLife = normalizeConnectionLife(life);
+  const duration = WORMHOLE_LIFE_DURATIONS[normalizedLife];
+  return duration ? new Date(millisecondsNow(now) + duration).toISOString() : null;
+}
+
+export function updateConnectionCondition(connection, updates = {}, now = Date.now()) {
+  const timestamp = new Date(millisecondsNow(now)).toISOString();
+  const previousLife = normalizeConnectionLife(connection?.life);
+  const life = updates.life == null ? previousLife : normalizeConnectionLife(updates.life);
+  const mass = updates.mass ?? connection?.mass;
+  const size = updates.size ?? connection?.size;
+  const currentExpiration = Date.parse(connection?.expiresAt);
+  const expiresAt = life === 'stable'
+    ? null
+    : life === previousLife && Number.isFinite(currentExpiration)
+      ? new Date(currentExpiration).toISOString()
+      : connectionLifeExpiresAt(life, timestamp);
+  return {
+    ...connection,
+    ...updates,
+    life,
+    expiresAt,
+    mass: ['reduced', 'critical'].includes(mass) ? mass : 'stable',
+    size: ['frigate', 'small', 'medium', 'large', 'xlarge'].includes(size) ? size : 'medium',
+    updatedAt: timestamp
+  };
 }
 
 export function emptyMapState() {
@@ -47,6 +94,14 @@ function normalizeConnection(connection, nodeIds) {
   const from = Number(connection?.from);
   const to = Number(connection?.to);
   if (!nodeIds.has(from) || !nodeIds.has(to) || from === to) return null;
+  const life = normalizeConnectionLife(connection.life);
+  const parsedExpiration = Date.parse(connection.expiresAt);
+  const parsedBaseline = Date.parse(connection.updatedAt || connection.createdAt);
+  const expiresAt = life === 'stable'
+    ? null
+    : Number.isFinite(parsedExpiration)
+      ? new Date(parsedExpiration).toISOString()
+      : connectionLifeExpiresAt(life, Number.isFinite(parsedBaseline) ? parsedBaseline : Date.now());
   return {
     id: connectionId(from, to),
     from,
@@ -55,7 +110,8 @@ function normalizeConnection(connection, nodeIds) {
     type: cleanText(connection.type, 12).toUpperCase(),
     fromSignature: cleanText(connection.fromSignature, 7).toUpperCase(),
     toSignature: cleanText(connection.toSignature, 7).toUpperCase(),
-    life: connection.life === 'eol' ? 'eol' : 'stable',
+    life,
+    expiresAt,
     mass: ['reduced', 'critical'].includes(connection.mass) ? connection.mass : 'stable',
     size: ['frigate', 'small', 'medium', 'large', 'xlarge'].includes(connection.size) ? connection.size : 'medium',
     source: connection.source === 'tracked' ? 'tracked' : 'manual',
@@ -164,6 +220,7 @@ export function addMapSystem(map, system, options = {}, now = () => new Date().t
       fromSignature: '',
       toSignature: '',
       life: 'stable',
+      expiresAt: null,
       mass: 'stable',
       size: 'medium',
       source: options.source === 'tracked' ? 'tracked' : 'manual',
@@ -187,26 +244,66 @@ export function addMapSystem(map, system, options = {}, now = () => new Date().t
   };
 }
 
+function signatureRowIdForReference(map, systemId, reference) {
+  const id = cleanText(reference, 7).toUpperCase();
+  if (!id) return '';
+  const rows = map.signatures?.[Number(systemId)] || [];
+  if (rows.some((signature) => signature.id === id)) return id;
+  if (id.length !== 3) return '';
+  const matches = rows.filter((signature) => signature.id.startsWith(`${id}-`));
+  return matches.length === 1 ? matches[0].id : '';
+}
+
+function removeConnections(map, shouldRemove, timestamp) {
+  const removedConnections = map.connections.filter(shouldRemove);
+  if (!removedConnections.length) return map;
+  const connections = map.connections.filter((connection) => !shouldRemove(connection));
+  const removedSignatures = new Map();
+  const retainedSignatures = new Map();
+  const recordSignatures = (connection, target) => {
+    [[connection.from, connection.fromSignature], [connection.to, connection.toSignature]].forEach(([systemId, reference]) => {
+      const signatureId = signatureRowIdForReference(map, systemId, reference);
+      if (!signatureId) return;
+      if (!target.has(systemId)) target.set(systemId, new Set());
+      target.get(systemId).add(signatureId);
+    });
+  };
+  removedConnections.forEach((connection) => recordSignatures(connection, removedSignatures));
+  connections.forEach((connection) => recordSignatures(connection, retainedSignatures));
+  const signatures = { ...map.signatures };
+  removedSignatures.forEach((signatureIds, systemId) => {
+    const retained = retainedSignatures.get(systemId) || new Set();
+    signatures[systemId] = (signatures[systemId] || []).filter((signature) => !signatureIds.has(signature.id) || retained.has(signature.id));
+  });
+  return { ...map, connections, signatures, updatedAt: timestamp };
+}
+
+export function removeMapConnection(map, connectionIdValue, now = () => new Date().toISOString()) {
+  const id = String(connectionIdValue || '');
+  return removeConnections(map, (connection) => connection.id === id, isoNow(now));
+}
+
 export function removeMapSystem(map, systemId, now = () => new Date().toISOString()) {
   const id = Number(systemId);
   if (!map.nodes.some((node) => node.id === id)) return map;
+  const timestamp = isoNow(now);
+  const withoutConnections = removeConnections(map, (connection) => connection.from === id || connection.to === id, timestamp);
   const nodes = map.nodes.filter((node) => node.id !== id);
-  const signatures = { ...map.signatures };
+  const signatures = { ...withoutConnections.signatures };
   delete signatures[id];
-  const lastLocations = { ...map.lastLocations };
+  const lastLocations = { ...withoutConnections.lastLocations };
   Object.entries(lastLocations).forEach(([characterId, locationId]) => {
     if (locationId === id) delete lastLocations[characterId];
   });
   const rootId = map.rootId === id ? nodes[0]?.id || null : map.rootId;
   return {
-    ...map,
+    ...withoutConnections,
     nodes,
-    connections: map.connections.filter((connection) => connection.from !== id && connection.to !== id),
     signatures,
     lastLocations,
     rootId,
     selectedSystemId: map.selectedSystemId === id ? rootId : map.selectedSystemId,
-    updatedAt: isoNow(now)
+    updatedAt: timestamp
   };
 }
 
@@ -354,9 +451,21 @@ function connectionSignatureAt(connection, systemId) {
   return '';
 }
 
-export function mapRoutingConnections(map, graph) {
+export function pruneExpiredConnections(map, now = Date.now()) {
+  const timestamp = millisecondsNow(now);
+  return removeConnections(map, (connection) => {
+    if (connection.kind === 'gate') return false;
+    const expiration = Date.parse(connection.expiresAt);
+    return Number.isFinite(expiration) && expiration <= timestamp;
+  }, new Date(timestamp).toISOString());
+}
+
+export function mapRoutingConnections(map, graph, now = Date.now()) {
+  const timestamp = millisecondsNow(now);
   return (map?.connections || []).flatMap((connection) => {
     if (connection.kind === 'gate') return [];
+    const expiration = Date.parse(connection.expiresAt);
+    if (normalizeConnectionLife(connection.life) === 'expired' || (Number.isFinite(expiration) && expiration <= timestamp)) return [];
     const from = graph?.get(connection.from);
     const to = graph?.get(connection.to);
     if (!from || !to) return [];
@@ -369,10 +478,10 @@ export function mapRoutingConnections(map, graph) {
   });
 }
 
-export function mapWormholeStepsForPath(map, graph, systems) {
+export function mapWormholeStepsForPath(map, graph, systems, now = Date.now()) {
   const path = systems || [];
   const pairs = new Map();
-  mapRoutingConnections(map, graph).forEach(({ from, to, mappedWormhole }) => {
+  mapRoutingConnections(map, graph, now).forEach(({ from, to, mappedWormhole }) => {
     pairs.set(`${from.id}:${to.id}`, mappedWormhole);
   });
   return path.slice(0, -1).flatMap((fromSystem, fromIndex) => {
@@ -390,10 +499,10 @@ export function mapWormholeStepsForPath(map, graph, systems) {
       toIndex: fromIndex + 1,
       signatureId: String(connectionSignatureAt(connection, fromSystem.id) || '').toUpperCase(),
       destinationSignatureId: String(connectionSignatureAt(connection, toSystem.id) || '').toUpperCase(),
-      expiresAt: null,
+      expiresAt: connection.expiresAt || null,
       maxShipSize: connection.size || 'unknown',
       wormholeType: connection.type || 'Unknown',
-      life: connection.life || 'stable',
+      life: normalizeConnectionLife(connection.life),
       mass: connection.mass || 'stable'
     }];
   });

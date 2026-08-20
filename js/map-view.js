@@ -1,6 +1,9 @@
 import {
+  addMapSystem,
   assignConnectionSignature,
   connectedMapSystemIds,
+  connectionLifeExpiresAt,
+  connectionId,
   computeChainLayout,
   emptyMapState,
   fitChainViewport,
@@ -8,7 +11,10 @@ import {
   observeCharacterMovements,
   parseScannerSignatures,
   preferredMapRoot,
+  pruneExpiredConnections,
+  removeMapConnection,
   removeMapSystem,
+  updateConnectionCondition,
   updateMapSignature,
   upsertSignatures,
   wormholeSignatureCandidates
@@ -21,6 +27,12 @@ const NODE_WIDTH = 176;
 const NODE_HEIGHT = 72;
 const SIGNATURE_ID_PATTERN = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/;
 const SIGNATURE_GROUPS = ['Cosmic Signature', 'Wormhole', 'Relic Site', 'Data Site', 'Gas Site', 'Combat Site', 'Unknown'];
+const CONNECTION_LIFE_OPTIONS = [
+  ['stable', 'Stable'],
+  ['under-4h', '&lt;4 hours'],
+  ['under-1h', '&lt;1 hour'],
+  ['expired', 'Expired']
+];
 
 function svgEscape(value) {
   return String(value ?? '')
@@ -57,6 +69,24 @@ function signatureGroupOptions(selectedGroup) {
   return groups.map((group) => `<option value="${svgEscape(group)}" ${group === selectedGroup ? 'selected' : ''}>${svgEscape(group === 'Cosmic Signature' ? 'Signature' : group)}</option>`).join('');
 }
 
+function connectionLifeOptions(selectedLife) {
+  return CONNECTION_LIFE_OPTIONS.map(([value, label]) => `<option value="${value}" ${value === selectedLife ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function connectionCountdownText(connection, now = Date.now()) {
+  if (!connection || connection.life === 'stable') return 'Stable · no automatic deletion';
+  const expiration = Date.parse(connection.expiresAt);
+  if (!Number.isFinite(expiration)) return 'Timer starts when saved';
+  const remaining = Math.max(0, expiration - now);
+  if (!remaining) return 'Expired · removing connection…';
+  const totalSeconds = Math.ceil(remaining / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const duration = hours ? `${hours}h ${minutes}m` : `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+  return `${connection.life === 'expired' ? 'Expired' : connection.life === 'under-1h' ? '<1 hour' : '<4 hours'} · auto-deletes in ${duration}`;
+}
+
 export class MapperView {
   constructor({ store, graph, toast, confirmAction, portraitUrl, activeCharacterId = null, onSystemSelected = () => {} }) {
     this.store = store;
@@ -81,6 +111,10 @@ export class MapperView {
     this.activeJumpPrompt = null;
     this.editingSignature = null;
     this.editingConnectionId = null;
+    this.editingConnectionDraft = null;
+    this.connectionExpiryTimer = null;
+    this.connectionCountdownTimer = null;
+    this.draggingSignature = null;
   }
 
   async init() {
@@ -89,6 +123,7 @@ export class MapperView {
       this.store.getSetting(MAP_VIEWPORT_KEY, null)
     ]);
     this.map = normalizeMapState(savedMap, this.graph);
+    await this.removeExpiredConnections({ notify: false, render: false });
     let sessionViewport = null;
     try {
       sessionViewport = JSON.parse(sessionStorage.getItem(MAP_VIEWPORT_SESSION_KEY) || 'null');
@@ -108,11 +143,8 @@ export class MapperView {
     this.map = latest.nodes.some((node) => node.id === selectedSystemId)
       ? { ...latest, selectedSystemId }
       : latest;
+    await this.removeExpiredConnections({ notify: false, render: false });
     this.render(this.characters);
-    if (this.editingConnectionId && !this.map.connections.some((connection) => connection.id === this.editingConnectionId)) {
-      document.getElementById('map-connection-dialog')?.close();
-      this.editingConnectionId = null;
-    }
     const newTrackedJumps = this.map.connections
       .filter((connection) => connection.kind === 'wormhole'
         && connection.source === 'tracked'
@@ -150,6 +182,7 @@ export class MapperView {
     this.renderToolbar();
     this.renderGraph();
     this.renderInspector();
+    this.scheduleConnectionExpiry();
   }
 
   setActiveCharacter(characterId, { fit = false, notify = true } = {}) {
@@ -223,7 +256,7 @@ export class MapperView {
         const direction = leftToRight ? 1 : -1;
         path = `M ${startX} ${startY} C ${startX + bend * direction} ${startY}, ${endX - bend * direction} ${endY}, ${endX} ${endY}`;
       }
-      return `<g class="map-connection-group ${connection.life === 'eol' ? 'is-eol' : ''} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
+      return `<g class="map-connection-group is-life-${connection.life} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
         <path class="map-connection-hit" d="${path}"></path>
         <path class="map-connection-line" d="${path}"></path>
       </g>`;
@@ -285,7 +318,7 @@ export class MapperView {
           <button class="map-inline-remove" type="button" data-map-remove-connection="${connection.id}" aria-label="Remove connection">×</button>
         </div>
         <div class="map-exit-fields">
-          <label>Life<select data-map-connection-field="life"><option value="stable" ${connection.life === 'stable' ? 'selected' : ''}>Stable</option><option value="eol" ${connection.life === 'eol' ? 'selected' : ''}>End of life</option></select></label>
+          <label>Life<select data-map-connection-field="life">${connectionLifeOptions(connection.life)}</select></label>
           <label>Mass<select data-map-connection-field="mass"><option value="stable" ${connection.mass === 'stable' ? 'selected' : ''}>Stable</option><option value="reduced" ${connection.mass === 'reduced' ? 'selected' : ''}>Reduced</option><option value="critical" ${connection.mass === 'critical' ? 'selected' : ''}>Critical</option></select></label>
           <label>Size<select data-map-connection-field="size"><option value="frigate" ${connection.size === 'frigate' ? 'selected' : ''}>Frigate</option><option value="small" ${connection.size === 'small' ? 'selected' : ''}>Small</option><option value="medium" ${connection.size === 'medium' ? 'selected' : ''}>Medium</option><option value="large" ${connection.size === 'large' ? 'selected' : ''}>Large</option><option value="xlarge" ${connection.size === 'xlarge' ? 'selected' : ''}>XL</option></select></label>
         </div>
@@ -296,6 +329,7 @@ export class MapperView {
       </article>`;
     }).join('');
     const unassignedSection = unassignedConnections.length ? `<details class="map-unassigned-connections"><summary>Unassigned exits <span class="map-section-count">${unassignedConnections.length}</span></summary>${unassignedExits}</details>` : '';
+    const draggableSignatureIds = new Set(wormholeSignatureCandidates(this.map, node.id).map((signature) => signature.id));
     const signatureRows = signatures.length ? signatures.map((signature) => {
       const connection = connections.find((candidate) => signatureForConnection(candidate)?.id === signature.id);
       const otherId = connection ? connection.from === node.id ? connection.to : connection.from : null;
@@ -305,10 +339,11 @@ export class MapperView {
       const detail = signature.type || signature.name || '—';
       const displayedDetail = connection ? [other?.name || otherId, connection.type].filter(Boolean).join(' · ') : detail;
       const editing = this.editingSignature?.systemId === node.id && this.editingSignature.id === signature.id;
+      const draggable = draggableSignatureIds.has(signature.id) && !editing;
       const connectionEditor = connection ? `<div class="map-signature-connection" data-map-connection-card="${connection.id}">
         <div class="map-signature-connection-heading"><span>Connection</span><button type="button" data-map-select-system="${otherId}">${svgEscape(other?.name || otherId)}</button><button class="map-inline-remove" type="button" data-map-remove-connection="${connection.id}" aria-label="Remove connection to ${svgEscape(other?.name || otherId)}">×</button></div>
         <div class="map-exit-fields map-signature-connection-fields">
-          <label>Life<select name="connectionLife"><option value="stable" ${connection.life === 'stable' ? 'selected' : ''}>Stable</option><option value="eol" ${connection.life === 'eol' ? 'selected' : ''}>End of life</option></select></label>
+          <label>Life<select name="connectionLife">${connectionLifeOptions(connection.life)}</select></label>
           <label>Mass<select name="connectionMass"><option value="stable" ${connection.mass === 'stable' ? 'selected' : ''}>Stable</option><option value="reduced" ${connection.mass === 'reduced' ? 'selected' : ''}>Reduced</option><option value="critical" ${connection.mass === 'critical' ? 'selected' : ''}>Critical</option></select></label>
           <label>Size<select name="connectionSize"><option value="frigate" ${connection.size === 'frigate' ? 'selected' : ''}>Frigate</option><option value="small" ${connection.size === 'small' ? 'selected' : ''}>Small</option><option value="medium" ${connection.size === 'medium' ? 'selected' : ''}>Medium</option><option value="large" ${connection.size === 'large' ? 'selected' : ''}>Large</option><option value="xlarge" ${connection.size === 'xlarge' ? 'selected' : ''}>XL</option></select></label>
           <label class="map-signature-connection-type">WH type<input name="connectionType" maxlength="12" autocomplete="off" value="${svgEscape(connection.type)}" placeholder="K162"></label>
@@ -323,7 +358,8 @@ export class MapperView {
           <div class="map-signature-edit-actions"><button class="button button-ghost" type="button" data-map-action="cancel-signature-edit">Cancel</button><button class="button button-primary" type="submit">Save</button></div>
         </form>
       </td></tr>` : '';
-      return `<tr class="map-signature-row ${editing ? 'is-editing' : ''}" data-map-edit-signature="${svgEscape(signature.id)}" title="${svgEscape(`${signature.id} · ${effectiveGroup}${detail === '—' ? '' : ` · ${detail}`}${connection ? ` · ${other?.name || otherId}` : ''}`)}">
+      const dragTitle = draggable ? ' · Drag onto a system to assign' : '';
+      return `<tr class="map-signature-row ${editing ? 'is-editing' : ''}" data-map-edit-signature="${svgEscape(signature.id)}" ${draggable ? `draggable="true" data-map-drag-signature="${svgEscape(signature.id)}" data-map-drag-system="${node.id}"` : ''} title="${svgEscape(`${signature.id} · ${effectiveGroup}${detail === '—' ? '' : ` · ${detail}`}${connection ? ` · ${other?.name || otherId}` : ''}${dragTitle}`)}">
         <td class="map-signature-id"><button class="map-signature-edit-trigger" type="button" aria-expanded="${editing}" aria-label="Edit signature ${svgEscape(signature.id)}">${svgEscape(signature.id)}</button></td>
         <td class="map-signature-group">${svgEscape(group)}</td>
         <td class="map-signature-type" title="${svgEscape(displayedDetail)}">${svgEscape(displayedDetail)}</td>
@@ -537,6 +573,49 @@ export class MapperView {
     }
   }
 
+  scheduleConnectionExpiry() {
+    if (typeof window === 'undefined') return;
+    window.clearTimeout(this.connectionExpiryTimer);
+    const expirations = this.map.connections
+      .filter((connection) => connection.kind !== 'gate')
+      .map((connection) => Date.parse(connection.expiresAt))
+      .filter(Number.isFinite);
+    if (!expirations.length) {
+      this.connectionExpiryTimer = null;
+      return;
+    }
+    const delay = Math.min(2_147_000_000, Math.max(50, Math.min(...expirations) - Date.now() + 25));
+    this.connectionExpiryTimer = window.setTimeout(() => {
+      this.removeExpiredConnections().catch((error) => this.toast(error.message, 'error'));
+    }, delay);
+  }
+
+  async removeExpiredConnections({ notify = true, render = true } = {}) {
+    const selectedSystemId = this.map.selectedSystemId;
+    let removed = 0;
+    const storedMap = await this.store.updateSetting(MAP_STATE_KEY, (value) => {
+      const current = normalizeMapState(value, this.graph);
+      const next = pruneExpiredConnections(current);
+      removed = current.connections.length - next.connections.length;
+      const needsLifetimeMigration = (value?.connections || []).some((connection) => {
+        const normalized = current.connections.find((candidate) => candidate.id === connectionId(connection.from, connection.to));
+        return normalized && (connection.life !== normalized.life || connection.expiresAt !== normalized.expiresAt);
+      });
+      return next !== current || needsLifetimeMigration ? next : value || current;
+    }, null);
+    const latest = normalizeMapState(storedMap, this.graph);
+    this.map = latest.nodes.some((node) => node.id === selectedSystemId)
+      ? { ...latest, selectedSystemId }
+      : latest;
+    if (this.editingConnectionId && !this.map.connections.some((connection) => connection.id === this.editingConnectionId)) {
+      document.getElementById('map-connection-dialog')?.close();
+      this.editingConnectionId = null;
+    }
+    if (render) this.render();
+    if (removed && notify) this.toast(`${removed === 1 ? 'Wormhole connection' : `${removed} wormhole connections`} expired and ${removed === 1 ? 'was' : 'were'} removed.`);
+    return removed;
+  }
+
   async mutate(mutator, { fit = false } = {}) {
     const previousSelection = this.map.selectedSystemId;
     this.map = await this.store.updateSetting(MAP_STATE_KEY, (storedMap) => {
@@ -577,14 +656,35 @@ export class MapperView {
     const from = this.graph.get(connection.from);
     const to = this.graph.get(connection.to);
     this.editingConnectionId = connection.id;
+    this.editingConnectionDraft = { life: connection.life, expiresAt: connection.expiresAt };
     document.getElementById('map-connection-title').textContent = 'Edit wormhole';
     document.getElementById('map-connection-systems').textContent = `${from?.name || connection.from} ↔ ${to?.name || connection.to}`;
     document.getElementById('map-connection-life').value = connection.life;
     document.getElementById('map-connection-mass').value = connection.mass;
     document.getElementById('map-connection-size').value = connection.size;
     dialog.showModal();
+    this.startConnectionCountdown();
     requestAnimationFrame(() => document.getElementById('map-connection-life')?.focus());
     return true;
+  }
+
+  updateConnectionCountdown() {
+    const output = document.getElementById('map-connection-expiry');
+    if (!output) return;
+    output.textContent = connectionCountdownText(this.editingConnectionDraft);
+  }
+
+  startConnectionCountdown() {
+    if (typeof window === 'undefined') return;
+    window.clearInterval(this.connectionCountdownTimer);
+    this.updateConnectionCountdown();
+    this.connectionCountdownTimer = window.setInterval(() => this.updateConnectionCountdown(), 1_000);
+  }
+
+  stopConnectionCountdown() {
+    if (typeof window !== 'undefined') window.clearInterval(this.connectionCountdownTimer);
+    this.connectionCountdownTimer = null;
+    this.editingConnectionDraft = null;
   }
 
   async saveConnectionEditor() {
@@ -593,7 +693,7 @@ export class MapperView {
     const life = document.getElementById('map-connection-life').value;
     const mass = document.getElementById('map-connection-mass').value;
     const size = document.getElementById('map-connection-size').value;
-    if (!['stable', 'eol'].includes(life)
+    if (!['stable', 'under-4h', 'under-1h', 'expired'].includes(life)
       || !['stable', 'reduced', 'critical'].includes(mass)
       || !['frigate', 'small', 'medium', 'large', 'xlarge'].includes(size)) {
       this.toast('Choose a valid wormhole condition.', 'error');
@@ -603,13 +703,73 @@ export class MapperView {
     await this.mutate((map) => ({
       ...map,
       connections: map.connections.map((connection) => connection.id === connectionId
-        ? { ...connection, life, mass, size, updatedAt }
+        ? updateConnectionCondition(connection, { life, mass, size }, updatedAt)
         : connection),
       updatedAt
     }));
     document.getElementById('map-connection-dialog')?.close();
     this.editingConnectionId = null;
     this.toast('Wormhole condition updated.');
+    return true;
+  }
+
+  async deleteConnectionEditor() {
+    const connectionId = this.editingConnectionId;
+    if (!connectionId) return false;
+    await this.mutate((map) => removeMapConnection(map, connectionId), { fit: true });
+    document.getElementById('map-connection-dialog')?.close();
+    this.editingConnectionId = null;
+    this.toast('Wormhole connection deleted.');
+    return true;
+  }
+
+  clearSignatureDropTarget() {
+    document.querySelectorAll('.map-system-node.is-signature-drop-target').forEach((node) => node.classList.remove('is-signature-drop-target'));
+  }
+
+  async assignSignatureToSystem(sourceSystemId, signatureId, targetSystemId) {
+    const sourceId = Number(sourceSystemId);
+    const targetId = Number(targetSystemId);
+    const id = String(signatureId || '').toUpperCase();
+    if (!Number.isSafeInteger(sourceId) || !Number.isSafeInteger(targetId) || sourceId === targetId || !SIGNATURE_ID_PATTERN.test(id)) return false;
+    let assigned = false;
+    let created = false;
+    let gateConflict = false;
+    await this.mutate((map) => {
+      if (!map.nodes.some((node) => node.id === sourceId) || !map.nodes.some((node) => node.id === targetId)) return map;
+      if (!wormholeSignatureCandidates(map, sourceId).some((signature) => signature.id === id)) return map;
+      const mappedConnectionId = connectionId(sourceId, targetId);
+      let connection = map.connections.find((candidate) => candidate.id === mappedConnectionId);
+      if (connection?.kind === 'gate') {
+        gateConflict = true;
+        return map;
+      }
+      let next = map;
+      if (!connection) {
+        const target = this.graph.get(targetId);
+        if (!target) return map;
+        const result = addMapSystem(map, target, { connectFrom: sourceId, kind: 'wormhole', source: 'tracked' });
+        if (!result.connected) return map;
+        created = true;
+        next = {
+          ...result.map,
+          selectedSystemId: map.selectedSystemId,
+          connections: result.map.connections.map((candidate) => candidate.id === mappedConnectionId
+            ? { ...candidate, source: 'manual' }
+            : candidate)
+        };
+        connection = next.connections.find((candidate) => candidate.id === mappedConnectionId);
+      }
+      const result = assignConnectionSignature(next, connection.id, sourceId, id);
+      assigned = result !== next;
+      return result;
+    });
+    if (!assigned) {
+      this.toast(gateConflict ? 'Those systems are connected by a stargate, not a wormhole.' : `${id} is no longer available to assign.`, 'error');
+      return false;
+    }
+    if (created) requestAnimationFrame(() => this.fit({ preferredScale: this.rememberedScale }));
+    this.toast(`${id} assigned to ${this.graph.get(targetId)?.name || targetId}.`);
     return true;
   }
 
@@ -631,8 +791,17 @@ export class MapperView {
       event.preventDefault();
       this.saveConnectionEditor().catch((error) => this.toast(error.message, 'error'));
     });
+    document.getElementById('map-connection-delete')?.addEventListener('click', () => {
+      this.deleteConnectionEditor().catch((error) => this.toast(error.message, 'error'));
+    });
     document.getElementById('map-connection-dialog')?.addEventListener('close', () => {
       this.editingConnectionId = null;
+      this.stopConnectionCountdown();
+    });
+    document.getElementById('map-connection-life')?.addEventListener('change', (event) => {
+      const life = event.target.value;
+      this.editingConnectionDraft = { life, expiresAt: connectionLifeExpiresAt(life) };
+      this.updateConnectionCountdown();
     });
     document.getElementById('map-jump-signatures')?.addEventListener('change', () => {
       const manual = document.getElementById('map-jump-signature-manual');
@@ -669,6 +838,28 @@ export class MapperView {
     };
     svg?.addEventListener('pointerup', stopPan);
     svg?.addEventListener('pointercancel', stopPan);
+    svg?.addEventListener('dragover', (event) => {
+      const node = event.target.closest('[data-map-system]');
+      if (!node || !this.draggingSignature || Number(node.dataset.mapSystem) === this.draggingSignature.systemId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'link';
+      this.clearSignatureDropTarget();
+      node.classList.add('is-signature-drop-target');
+    });
+    svg?.addEventListener('dragleave', (event) => {
+      const node = event.target.closest('[data-map-system]');
+      if (node && !node.contains(event.relatedTarget)) node.classList.remove('is-signature-drop-target');
+    });
+    svg?.addEventListener('drop', (event) => {
+      const node = event.target.closest('[data-map-system]');
+      const dragging = this.draggingSignature;
+      this.clearSignatureDropTarget();
+      this.draggingSignature = null;
+      if (!node || !dragging) return;
+      event.preventDefault();
+      this.assignSignatureToSystem(dragging.systemId, dragging.signatureId, node.dataset.mapSystem)
+        .catch((error) => this.toast(error.message, 'error'));
+    });
     svg?.addEventListener('click', (event) => {
       const connection = event.target.closest('[data-map-connection]');
       if (connection) return this.openConnectionEditor(connection.dataset.mapConnection);
@@ -687,11 +878,29 @@ export class MapperView {
       event.preventDefault();
       this.selectSystem(node.dataset.mapSystem);
     });
+    document.getElementById('map-inspector-content')?.addEventListener('dragstart', (event) => {
+      const row = event.target.closest('[data-map-drag-signature]');
+      if (!row) return;
+      this.draggingSignature = {
+        systemId: Number(row.dataset.mapDragSystem),
+        signatureId: row.dataset.mapDragSignature
+      };
+      row.classList.add('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'link';
+        event.dataTransfer.setData('text/plain', row.dataset.mapDragSignature);
+      }
+    });
+    document.getElementById('map-inspector-content')?.addEventListener('dragend', (event) => {
+      event.target.closest('[data-map-drag-signature]')?.classList.remove('is-dragging');
+      this.draggingSignature = null;
+      this.clearSignatureDropTarget();
+    });
     document.getElementById('map-inspector-content')?.addEventListener('click', async (event) => {
       const select = event.target.closest('[data-map-select-system]');
       if (select) return this.selectSystem(select.dataset.mapSelectSystem);
       const removeConnection = event.target.closest('[data-map-remove-connection]');
-      if (removeConnection) return this.mutate((map) => ({ ...map, connections: map.connections.filter((connection) => connection.id !== removeConnection.dataset.mapRemoveConnection) }), { fit: true });
+      if (removeConnection) return this.mutate((map) => removeMapConnection(map, removeConnection.dataset.mapRemoveConnection), { fit: true });
       const removeSignature = event.target.closest('[data-map-remove-signature]');
       if (removeSignature) {
         this.editingSignature = null;
@@ -743,7 +952,7 @@ export class MapperView {
             connections: next.connections.map((connection) => {
               if (connection.id !== connectionId) return connection;
               const signatureField = connection.from === map.selectedSystemId ? 'fromSignature' : 'toSignature';
-              return { ...connection, [signatureField]: id, life, mass, size, type: connectionType, updatedAt };
+              return updateConnectionCondition(connection, { [signatureField]: id, life, mass, size, type: connectionType }, updatedAt);
             }),
             updatedAt
           };
@@ -781,7 +990,18 @@ export class MapperView {
         field = connection.from === this.map.selectedSystemId ? 'fromSignature' : 'toSignature';
       }
       const value = event.target.value.trim();
-      this.mutate((map) => ({ ...map, connections: map.connections.map((connection) => connection.id === card.dataset.mapConnectionCard ? { ...connection, [field]: ['type', 'fromSignature', 'toSignature'].includes(field) ? value.toUpperCase() : value, updatedAt: new Date().toISOString() } : connection) }));
+      const updatedAt = new Date().toISOString();
+      this.mutate((map) => ({
+        ...map,
+        connections: map.connections.map((connection) => {
+          if (connection.id !== card.dataset.mapConnectionCard) return connection;
+          const normalizedValue = ['type', 'fromSignature', 'toSignature'].includes(field) ? value.toUpperCase() : value;
+          return ['life', 'mass', 'size'].includes(field)
+            ? updateConnectionCondition(connection, { [field]: normalizedValue }, updatedAt)
+            : { ...connection, [field]: normalizedValue, updatedAt };
+        }),
+        updatedAt
+      }));
     });
     document.addEventListener('paste', (event) => {
       const mapView = document.getElementById('view-map');
