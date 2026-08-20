@@ -379,7 +379,7 @@
               <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
             </label>
           </div>
-          <small id="route-wormhole-status" class="wormhole-status" aria-live="polite">Off. This route uses stargates and custom connections only.</small>
+          <small id="route-wormhole-status" class="wormhole-status" aria-live="polite">Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.</small>
         </fieldset>
         <div class="field editor-wide system-builder">
           <span>Extra one-way connections <small>optional</small></span>
@@ -464,7 +464,7 @@
               <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
             </label>
           </div>
-          <small id="assignment-wormhole-status" class="wormhole-status" aria-live="polite">Off. This assignment uses stargates and custom connections only.</small>
+          <small id="assignment-wormhole-status" class="wormhole-status" aria-live="polite">Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.</small>
         </fieldset>
         <fieldset class="preference-fieldset assignment-preference-fieldset">
           <legend>Route preference</legend>
@@ -557,7 +557,7 @@
                 <span><strong>Turnur</strong><small>Use active EVE-Scout links</small></span>
               </label>
             </div>
-            <small id="ad-hoc-wormhole-status" class="wormhole-status" aria-live="polite">Off. This route uses stargates and custom connections only.</small>
+            <small id="ad-hoc-wormhole-status" class="wormhole-status" aria-live="polite">Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.</small>
           </fieldset>
 
           <div class="field system-builder ad-hoc-avoid-builder">
@@ -628,11 +628,11 @@
         <p id="map-jump-message" class="map-jump-message"></p>
         <div id="map-jump-route" class="map-jump-route" aria-label="Detected jump"></div>
         <fieldset id="map-jump-options" class="map-jump-options"><legend>Origin signature</legend><div id="map-jump-signatures"></div></fieldset>
-        <label class="map-jump-manual"><span>Enter a different signature</span><input id="map-jump-signature-manual" maxlength="7" placeholder="ABC-123" spellcheck="false" inputmode="text"></label>
+        <label class="map-jump-manual"><span>Enter a different signature</span><input id="map-jump-signature-manual" maxlength="7" placeholder="ABC or ABC-123" spellcheck="false" inputmode="text" autocapitalize="characters"></label>
       </div>
       <div class="modal-footer">
         <button id="map-jump-skip" class="button button-ghost" type="button">Skip for now</button>
-        <button id="map-jump-submit" class="button button-primary" type="submit" disabled>Map connection</button>
+        <button id="map-jump-submit" class="button button-primary" type="submit">Map connection</button>
       </div>
     </form>
   </dialog>

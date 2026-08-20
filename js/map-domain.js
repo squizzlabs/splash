@@ -1,5 +1,6 @@
 const MAP_VERSION = 1;
-const SIGNATURE_ID = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/i;
+const SCANNER_SIGNATURE_ID = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/i;
+const SIGNATURE_REFERENCE = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/i;
 
 function isoNow(now) {
   return typeof now === 'function' ? now() : new Date().toISOString();
@@ -65,7 +66,7 @@ function normalizeConnection(connection, nodeIds) {
 
 function normalizeSignature(signature) {
   const id = cleanText(signature?.id, 7).toUpperCase();
-  if (!SIGNATURE_ID.test(id)) return null;
+  if (!SIGNATURE_REFERENCE.test(id)) return null;
   const type = cleanText(signature.type, 72);
   const name = cleanText(signature.name, 120);
   const rawGroup = cleanText(signature.group, 32);
@@ -285,7 +286,7 @@ export function parseScannerSignatures(text, now = () => new Date().toISOString(
   const seen = new Set();
   String(text || '').split(/\r?\n/).forEach((line) => {
     const columns = line.split('\t').map((value) => value.trim());
-    const signatureIndex = columns.findIndex((value) => SIGNATURE_ID.test(value));
+    const signatureIndex = columns.findIndex((value) => SCANNER_SIGNATURE_ID.test(value));
     if (signatureIndex < 0) return;
     const id = columns[signatureIndex].toUpperCase();
     if (seen.has(id)) return;
@@ -320,10 +321,82 @@ export function upsertSignatures(map, systemId, signatures, now = () => new Date
   return { ...map, signatures: { ...map.signatures, [id]: rows }, updatedAt: isoNow(now) };
 }
 
+export function updateMapSignature(map, systemId, signatureId, updates, now = () => new Date().toISOString()) {
+  const id = Number(systemId);
+  const originalId = cleanText(signatureId, 7).toUpperCase();
+  const rows = map.signatures[id] || [];
+  const current = rows.find((signature) => signature.id === originalId);
+  if (!current) return map;
+  const updatedAt = isoNow(now);
+  const signature = normalizeSignature({ ...current, ...updates, updatedAt });
+  if (!signature || rows.some((row) => row.id === signature.id && row.id !== originalId)) return map;
+  const nextRows = rows.map((row) => row.id === originalId ? signature : row)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const connections = map.connections.map((connection) => {
+    let changed = false;
+    const next = { ...connection };
+    if (connection.from === id && String(connection.fromSignature || '').toUpperCase() === originalId) {
+      next.fromSignature = signature.id;
+      changed = true;
+    }
+    if (connection.to === id && String(connection.toSignature || '').toUpperCase() === originalId) {
+      next.toSignature = signature.id;
+      changed = true;
+    }
+    return changed ? { ...next, updatedAt } : connection;
+  });
+  return { ...map, connections, signatures: { ...map.signatures, [id]: nextRows }, updatedAt };
+}
+
 function connectionSignatureAt(connection, systemId) {
   if (connection.from === systemId) return connection.fromSignature;
   if (connection.to === systemId) return connection.toSignature;
   return '';
+}
+
+export function mapRoutingConnections(map, graph) {
+  return (map?.connections || []).flatMap((connection) => {
+    if (connection.kind === 'gate') return [];
+    const from = graph?.get(connection.from);
+    const to = graph?.get(connection.to);
+    if (!from || !to) return [];
+    const fromSystem = { id: Number(from.id), name: String(from.name) };
+    const toSystem = { id: Number(to.id), name: String(to.name) };
+    return [
+      ...(connection.fromSignature ? [{ from: fromSystem, to: toSystem, mappedWormhole: connection }] : []),
+      ...(connection.toSignature ? [{ from: toSystem, to: fromSystem, mappedWormhole: connection }] : [])
+    ];
+  });
+}
+
+export function mapWormholeStepsForPath(map, graph, systems) {
+  const path = systems || [];
+  const pairs = new Map();
+  mapRoutingConnections(map, graph).forEach(({ from, to, mappedWormhole }) => {
+    pairs.set(`${from.id}:${to.id}`, mappedWormhole);
+  });
+  return path.slice(0, -1).flatMap((fromSystem, fromIndex) => {
+    const toSystem = path[fromIndex + 1];
+    const connection = pairs.get(`${Number(fromSystem.id)}:${Number(toSystem.id)}`);
+    if (!connection) return [];
+    return [{
+      id: `map:${connection.id}`,
+      key: `wormhole:map:${connection.id}:${fromIndex}:${fromIndex + 1}`,
+      source: 'map',
+      hub: '',
+      from: { id: Number(fromSystem.id), name: String(fromSystem.name) },
+      to: { id: Number(toSystem.id), name: String(toSystem.name) },
+      fromIndex,
+      toIndex: fromIndex + 1,
+      signatureId: String(connectionSignatureAt(connection, fromSystem.id) || '').toUpperCase(),
+      destinationSignatureId: String(connectionSignatureAt(connection, toSystem.id) || '').toUpperCase(),
+      expiresAt: null,
+      maxShipSize: connection.size || 'unknown',
+      wormholeType: connection.type || 'Unknown',
+      life: connection.life || 'stable',
+      mass: connection.mass || 'stable'
+    }];
+  });
 }
 
 export function wormholeSignatureCandidates(map, systemId, targetConnectionId = '') {
@@ -343,15 +416,18 @@ export function wormholeSignatureCandidates(map, systemId, targetConnectionId = 
 export function assignConnectionSignature(map, connectionIdValue, systemId, signatureId, now = () => new Date().toISOString()) {
   const id = Number(systemId);
   const signature = cleanText(signatureId, 7).toUpperCase();
-  if (!SIGNATURE_ID.test(signature)) return map;
+  if (!SIGNATURE_REFERENCE.test(signature)) return map;
   const connection = map.connections.find((candidate) => candidate.id === connectionIdValue);
   if (!connection || (connection.from !== id && connection.to !== id)) return map;
   const field = connection.from === id ? 'fromSignature' : 'toSignature';
   const timestamp = isoNow(now);
   const rows = [...(map.signatures[id] || [])];
-  if (!rows.some((candidate) => candidate.id === signature)) {
+  const signatureIndex = rows.findIndex((candidate) => candidate.id === signature);
+  if (signatureIndex < 0) {
     rows.push({ id: signature, group: 'Wormhole', type: '', name: '', updatedAt: timestamp });
     rows.sort((left, right) => left.id.localeCompare(right.id));
+  } else if (['Cosmic Signature', 'Unknown'].includes(rows[signatureIndex].group)) {
+    rows[signatureIndex] = { ...rows[signatureIndex], group: 'Wormhole', updatedAt: timestamp };
   }
   return {
     ...map,

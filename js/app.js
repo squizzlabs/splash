@@ -2,6 +2,7 @@ import { APP_CONFIG } from './config.js';
 import { TripStore } from './db.js';
 import { ESIClient } from './esi.js';
 import { connectionsForWormholeHubs, EveScoutClient, normalizeWormholeHubs, wormholeStepsForPath } from './eve-scout.js';
+import { mapRoutingConnections, mapWormholeStepsForPath } from './map-domain.js';
 import {
   advanceRouteProgress,
   buildRoute,
@@ -241,9 +242,21 @@ function routingOptions(route) {
     ...route,
     connections: [
       ...(route.connections || []),
+      ...mapRoutingConnections(state.mapper?.map, state.graph),
       ...connectionsForWormholeHubs(state.wormholeLinks, route.wormholeHubs)
     ]
   };
+}
+
+function routeWormholeStepsForPath(route, systems) {
+  const mapped = mapWormholeStepsForPath(state.mapper?.map, state.graph, systems);
+  const mappedIndexes = new Set(mapped.map((step) => step.fromIndex));
+  const hubs = new Set(normalizeWormholeHubs(route.wormholeHubs));
+  const live = wormholeStepsForPath(
+    state.wormholeLinks.filter((link) => hubs.has(link.hub)),
+    systems
+  ).filter((step) => !mappedIndexes.has(step.fromIndex));
+  return [...mapped, ...live].sort((left, right) => left.fromIndex - right.fromIndex);
 }
 
 function renderWormholeStatus(status, hubs, offMessage) {
@@ -266,7 +279,7 @@ function renderWormholeStatus(status, hubs, offMessage) {
     return `${hub === 'thera' ? 'Thera' : 'Turnur'} ${count}`;
   });
   status.textContent = state.wormholeFetchedAt
-    ? `${counts.join(' · ')} active · checked ${formatRelative(state.wormholeFetchedAt)}`
+    ? `${counts.join(' · ')} active · mapped chain included · checked ${formatRelative(state.wormholeFetchedAt)}`
     : 'Active connections will load before this route is calculated.';
 }
 
@@ -274,17 +287,17 @@ function renderWormholeStatuses() {
   renderWormholeStatus(
     $('route-wormhole-status'),
     selectedEditorWormholeHubs(),
-    'Off. This route uses stargates and custom connections only.'
+    'Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.'
   );
   renderWormholeStatus(
     $('assignment-wormhole-status'),
     selectedAssignmentWormholeHubs(),
-    'Off. This assignment uses stargates and custom connections only.'
+    'Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.'
   );
   renderWormholeStatus(
     $('ad-hoc-wormhole-status'),
     selectedAdHocWormholeHubs(),
-    'Off. This route uses stargates and custom connections only.'
+    'Mapped wormholes are included automatically. Live EVE-Scout shortcuts are off.'
   );
 }
 
@@ -686,16 +699,20 @@ function wormholeInstructionMarkup(wormhole, assignment) {
   const stepKey = wormhole.key || `${wormhole.id}:${wormhole.fromIndex}:${wormhole.toIndex}`;
   const isActive = Boolean(active && stepKey === activeKey);
   const atHole = isActive && assignment.nextAction.kind === 'wormhole';
-  const expired = Date.parse(wormhole.expiresAt) <= Date.now();
+  const hasExpiration = Number.isFinite(Date.parse(wormhole.expiresAt));
+  const expired = hasExpiration && Date.parse(wormhole.expiresAt) <= Date.now();
   const instruction = expired
     ? `<strong>${escapeHtml(wormhole.from.name)}</strong><span>SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>has expired — reassign this route</span>`
     : atHole
       ? `<span>Warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`
       : `<span>At</span><strong>${escapeHtml(wormhole.from.name)}</strong><span>warp to SIG</span><b>${escapeHtml(wormhole.signatureId)}</b><span>→</span><strong>${escapeHtml(wormhole.to.name)}</strong>`;
+  const details = wormhole.source === 'map'
+    ? `Mapped · ${wormhole.wormholeType} · ${wormhole.life === 'eol' ? 'end of life' : 'stable life'} · ${wormhole.mass === 'critical' ? 'critical mass' : wormhole.mass === 'reduced' ? 'reduced mass' : 'stable mass'} · max ${wormhole.maxShipSize}`
+    : `${wormhole.wormholeType} · max ${wormhole.maxShipSize} · ${formatTimeRemaining(wormhole.expiresAt)}`;
   return `<div class="pilot-wormhole-stop ${isActive ? 'is-active' : ''} ${expired ? 'is-expired' : ''}">
     <img class="pilot-wormhole-symbol" src="./images/whpd-wormhole.svg" alt="" title="Wormhole">
     <span class="pilot-wormhole-instruction">${instruction}</span>
-    <small>${escapeHtml(wormhole.wormholeType)} · max ${escapeHtml(wormhole.maxShipSize)} · ${escapeHtml(formatTimeRemaining(wormhole.expiresAt))}</small>
+    <small>${escapeHtml(details)}</small>
   </div>`;
 }
 
@@ -1613,7 +1630,6 @@ function resolveStop(query, label) {
 
 function calculateSeedItinerary(seed, origin, characterId = null) {
   const options = routingOptions(seed);
-  const selectedHubs = new Set(normalizeWormholeHubs(seed.wormholeHubs));
   let result;
   if (seed.mode === 'coverage') {
     const targets = seed.stops || [];
@@ -1630,10 +1646,7 @@ function calculateSeedItinerary(seed, origin, characterId = null) {
   }
   return {
     ...result,
-    wormholeSteps: wormholeStepsForPath(
-      state.wormholeLinks.filter((link) => selectedHubs.has(link.hub)),
-      result.systems
-    )
+    wormholeSteps: routeWormholeStepsForPath(seed, result.systems)
   };
 }
 

@@ -8,14 +8,18 @@ import {
   computeChainLayout,
   emptyMapState,
   fitChainViewport,
+  mapRoutingConnections,
+  mapWormholeStepsForPath,
   normalizeMapState,
   observeCharacterMovements,
   parseScannerSignatures,
   preferredMapRoot,
   removeMapSystem,
+  updateMapSignature,
   upsertSignatures,
   wormholeSignatureCandidates
 } from '../js/map-domain.js';
+import { UniverseGraph } from '../js/route-planner.js';
 
 const systems = new Map([
   [1, { id: 1, name: 'Alpha', adjacent: [2] }],
@@ -142,6 +146,27 @@ test('previous unresolved imports migrate from Unknown to Cosmic Signature', () 
   assert.equal(map.signatures[1][0].group, 'Cosmic Signature');
 });
 
+test('editing a signature updates its details and its connection-side reference', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'ABC-123', group: 'Cosmic Signature' }], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'ABC-123', now);
+  map = updateMapSignature(map, 1, 'ABC-123', {
+    id: 'XYZ-987',
+    group: 'Wormhole',
+    type: 'Unstable Wormhole',
+    name: 'Unstable Wormhole'
+  }, now);
+  assert.deepEqual(map.signatures[1][0], {
+    id: 'XYZ-987',
+    group: 'Wormhole',
+    type: 'Unstable Wormhole',
+    name: 'Unstable Wormhole',
+    updatedAt: now()
+  });
+  assert.equal(map.connections[0].fromSignature, 'XYZ-987');
+});
+
 test('wormhole prompt candidates exclude sites and signatures used by other connections', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
@@ -168,6 +193,65 @@ test('assigning a jump signature labels the correct connection side and records 
     name: '',
     updatedAt: now()
   });
+});
+
+test('assigning an existing unresolved signature promotes it to a wormhole', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'OPU-480', group: 'Cosmic Signature' }], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'OPU-480', now);
+  assert.equal(map.signatures[1][0].group, 'Wormhole');
+  assert.equal(map.connections[0].fromSignature, 'OPU-480');
+});
+
+test('a three-letter custom signature can be assigned to a connection', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 1, 'opu', now);
+  assert.equal(map.connections[0].fromSignature, 'OPU');
+  assert.equal(map.signatures[1][0].id, 'OPU');
+  assert.equal(map.signatures[1][0].group, 'Wormhole');
+});
+
+test('mapped wormholes become direction-specific routing edges and instructions', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA', now);
+  map.connections[0] = { ...map.connections[0], type: 'K162', life: 'eol', mass: 'reduced', size: 'medium' };
+
+  const forwardOnly = mapRoutingConnections(map, graph);
+  assert.deepEqual(forwardOnly.map(({ from, to }) => [from.id, to.id]), [[1, 3]]);
+  const routingGraph = new UniverseGraph({
+    schemaVersion: 1,
+    maxGateDistance: 1,
+    systems: [
+      [1, 'Alpha', -1, 1, 0, 0, 0, []],
+      [3, 'J123456', -1, 1, 100, 0, 0, []]
+    ]
+  });
+  assert.deepEqual(routingGraph.astar(1, 3, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph) }), [1, 3]);
+  assert.throws(() => routingGraph.astar(3, 1, { preference: 'Shorter', connections: mapRoutingConnections(map, routingGraph) }), /No known route/);
+  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(1), systems.get(3)])[0], {
+    id: 'map:1:3',
+    key: 'wormhole:map:1:3:0:1',
+    source: 'map',
+    hub: '',
+    from: { id: 1, name: 'Alpha' },
+    to: { id: 3, name: 'J123456' },
+    fromIndex: 0,
+    toIndex: 1,
+    signatureId: 'AAA',
+    destinationSignatureId: '',
+    expiresAt: null,
+    maxShipSize: 'medium',
+    wormholeType: 'K162',
+    life: 'eol',
+    mass: 'reduced'
+  });
+  assert.deepEqual(mapWormholeStepsForPath(map, graph, [systems.get(3), systems.get(1)]), []);
+
+  map = assignConnectionSignature(map, '1:3', 3, 'BBB-222', now);
+  assert.deepEqual(mapRoutingConnections(map, graph).map(({ from, to }) => [from.id, to.id]), [[1, 3], [3, 1]]);
 });
 
 test('chain layout puts the root on top and adjacent branches below', () => {

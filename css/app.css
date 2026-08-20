@@ -345,6 +345,9 @@ h1, h2, h3, p { margin-top: 0; }
 .map-exit-fields select, .map-exit-fields input { width: 100%; min-width: 0; min-height: 27px; padding: 0 6px; color: var(--text); font-size: 10px; text-transform: none; }
 .map-exit-fields select { padding-right: 18px; }
 .map-exit-identifiers { grid-template-columns: 1fr 1fr; margin-top: 4px; }
+.map-unassigned-connections { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.map-unassigned-connections > summary { display: flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 9px; font-weight: 750; cursor: pointer; }
+.map-unassigned-connections > summary::marker { color: var(--muted-strong); }
 .map-signature-manual, .map-signature-import { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line-soft); }
 .map-signature-manual summary, .map-signature-import summary { color: var(--muted-strong); font-size: 9px; font-weight: 750; cursor: pointer; }
 .map-signature-form { display: grid; grid-template-columns: 70px 1fr; gap: 4px; margin-top: 5px; }
@@ -353,13 +356,30 @@ h1, h2, h3, p { margin-top: 0; }
 .map-signature-form .button { grid-column: 1 / -1; min-height: 26px; padding: 0 9px; font-size: 9px; }
 .map-signature-table { width: 100%; margin-top: 0; border-collapse: collapse; table-layout: fixed; font-size: 10px; }
 .map-signature-table td { height: 29px; padding: 4px 3px; overflow: hidden; color: var(--text); border-top: 1px solid var(--line-soft); vertical-align: middle; white-space: nowrap; text-overflow: ellipsis; }
+.map-signature-row { cursor: pointer; }
+.map-signature-row:hover td, .map-signature-row.is-editing td { background: var(--panel-strong); }
 .map-signature-table .map-signature-id { width: 62px; color: var(--accent); font: 800 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.map-signature-edit-trigger { width: auto; height: auto; padding: 0; color: inherit; background: transparent; border: 0; font: inherit; text-align: left; }
+.map-signature-edit-trigger:focus-visible { border-radius: 2px; outline: 2px solid var(--blue); outline-offset: 2px; }
 .map-signature-table .map-signature-group { width: 82px; color: var(--text); font-weight: 760; }
 .map-signature-table .map-signature-type { color: var(--muted-strong); }
 .map-signature-table .map-signature-age { width: 26px; color: var(--metadata); font: 750 9px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
 .map-signature-table .map-signature-remove { width: 18px; padding-inline: 0; text-align: right; }
-.map-signature-table button { width: 17px; height: 17px; padding: 0; color: var(--muted); background: transparent; border: 0; }
-.map-signature-table button:hover { color: var(--danger); }
+.map-signature-remove button { width: 17px; height: 17px; padding: 0; color: var(--muted); background: transparent; border: 0; }
+.map-signature-remove button:hover { color: var(--danger); }
+.map-signature-table .map-signature-editor-row td { height: auto; padding: 6px; overflow: visible; background: var(--panel-soft); white-space: normal; }
+.map-signature-edit-form { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 5px; }
+.map-signature-edit-form label { display: grid; gap: 3px; min-width: 0; color: var(--metadata); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.map-signature-edit-form input, .map-signature-edit-form select { width: 100%; min-width: 0; min-height: 27px; padding: 0 6px; color: var(--text); font-size: 10px; text-transform: none; }
+.map-signature-edit-form select { padding-right: 18px; }
+.map-signature-edit-type, .map-signature-edit-actions { grid-column: 1 / -1; }
+.map-signature-connection { grid-column: 1 / -1; margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--line); }
+.map-signature-connection-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) 18px; align-items: center; gap: 6px; margin-bottom: 5px; }
+.map-signature-connection-heading > span { color: var(--metadata); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.map-signature-connection-heading > button:nth-child(2) { min-width: 0; padding: 0; overflow: hidden; color: var(--text); background: transparent; border: 0; font-size: 10px; font-weight: 780; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.map-signature-connection-type { grid-column: 1 / -1; }
+.map-signature-edit-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.map-signature-edit-actions .button { min-height: 26px; padding: 0 10px; font-size: 9px; }
 .map-signature-empty { padding: 8px !important; color: var(--muted); text-align: center; }
 .map-signature-import textarea { width: 100%; margin-top: 6px; padding: 7px; resize: vertical; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .map-signature-import .button { width: 100%; min-height: 26px; margin-top: 4px; font-size: 9px; }

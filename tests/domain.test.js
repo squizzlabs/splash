@@ -383,6 +383,38 @@ test('wormhole navigation stages approach the hole, show its signature, and neve
   assert.deepEqual(imported.calculations[0].wormholeSteps.map((step) => step.signatureId), ['INB-123', 'OUT-789']);
 });
 
+test('mapped wormhole calculations allow a local signature without a fabricated expiry', () => {
+  const route = buildRoute({
+    origin: systems.a,
+    stops: [systems.b],
+    calculations: [{
+      origin: systems.a,
+      systems: [systems.a, systems.b],
+      wormholeSteps: [{
+        id: 'map:1:2',
+        source: 'map',
+        from: systems.a,
+        to: systems.b,
+        fromIndex: 0,
+        toIndex: 1,
+        signatureId: 'ABC',
+        destinationSignatureId: '',
+        expiresAt: null,
+        maxShipSize: 'medium',
+        wormholeType: 'K162',
+        life: 'stable',
+        mass: 'critical'
+      }]
+    }]
+  });
+  const [step] = route.calculations[0].wormholeSteps;
+  assert.equal(step.source, 'map');
+  assert.equal(step.signatureId, 'ABC');
+  assert.equal(step.destinationSignatureId, '');
+  assert.equal(step.expiresAt, null);
+  assert.equal(step.mass, 'critical');
+});
+
 test('the next regular waypoint is exposed only after the previous one is reached', () => {
   const route = buildRoute({
     origin: systems.a,

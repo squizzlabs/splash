@@ -411,25 +411,30 @@ export function buildRoute(input, previous = null) {
       const to = normalizeSystem(step.to, `wormhole step ${index + 1} destination`);
       const signatureId = String(step.signatureId || '').trim().toUpperCase();
       const destinationSignatureId = String(step.destinationSignatureId || '').trim().toUpperCase();
+      const source = step.source === 'map' ? 'map' : 'eve-scout';
+      const parsedExpiration = Date.parse(step.expiresAt);
       if (!Number.isInteger(fromIndex) || toIndex !== fromIndex + 1 || systems[fromIndex]?.id !== from.id || systems[toIndex]?.id !== to.id) {
         throw new Error(`Wormhole step ${index + 1} does not match the calculated route.`);
       }
-      if (!signatureId || !destinationSignatureId || !Number.isFinite(Date.parse(step.expiresAt))) {
+      if (!signatureId || (source !== 'map' && (!destinationSignatureId || !Number.isFinite(parsedExpiration)))) {
         throw new Error(`Wormhole step ${index + 1} is missing its signatures or expiration.`);
       }
       return {
         id: String(step.id || `${from.id}:${to.id}`),
         key: String(step.key || `wormhole:${step.id || `${from.id}:${to.id}`}:${fromIndex}:${toIndex}`),
         hub: normalizeWormholeHubs([step.hub])[0] || '',
+        source,
         from,
         to,
         fromIndex,
         toIndex,
         signatureId,
         destinationSignatureId,
-        expiresAt: new Date(step.expiresAt).toISOString(),
+        expiresAt: Number.isFinite(parsedExpiration) ? new Date(parsedExpiration).toISOString() : null,
         maxShipSize: String(step.maxShipSize || 'unknown'),
-        wormholeType: String(step.wormholeType || 'Unknown')
+        wormholeType: String(step.wormholeType || 'Unknown'),
+        life: step.life === 'eol' ? 'eol' : 'stable',
+        mass: ['reduced', 'critical'].includes(step.mass) ? step.mass : 'stable'
       };
     });
     const characterId = calculation.characterId == null ? null : Number(calculation.characterId);
