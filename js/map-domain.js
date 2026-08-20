@@ -8,6 +8,7 @@ export const WORMHOLE_LIFE_DURATIONS = Object.freeze({
   'under-1h': 60 * 60 * 1_000,
   expired: 30 * 60 * 1_000
 });
+export const SIGNATURE_EXPIRY_MS = 3 * 24 * 60 * 60 * 1_000;
 
 function isoNow(now) {
   return typeof now === 'function' ? now() : new Date().toISOString();
@@ -254,6 +255,19 @@ function signatureRowIdForReference(map, systemId, reference) {
   return matches.length === 1 ? matches[0].id : '';
 }
 
+function connectionSignatureRows(map) {
+  const assigned = new Map();
+  (map.connections || []).forEach((connection) => {
+    [[connection.from, connection.fromSignature], [connection.to, connection.toSignature]].forEach(([systemId, reference]) => {
+      const signatureId = signatureRowIdForReference(map, systemId, reference);
+      if (!signatureId) return;
+      if (!assigned.has(Number(systemId))) assigned.set(Number(systemId), new Set());
+      assigned.get(Number(systemId)).add(signatureId);
+    });
+  });
+  return assigned;
+}
+
 function removeConnections(map, shouldRemove, timestamp) {
   const removedConnections = map.connections.filter(shouldRemove);
   if (!removedConnections.length) return map;
@@ -458,6 +472,51 @@ export function pruneExpiredConnections(map, now = Date.now()) {
     const expiration = Date.parse(connection.expiresAt);
     return Number.isFinite(expiration) && expiration <= timestamp;
   }, new Date(timestamp).toISOString());
+}
+
+export function pruneExpiredSignatures(map, now = Date.now()) {
+  const timestamp = millisecondsNow(now);
+  const updatedAt = new Date(timestamp).toISOString();
+  const assigned = connectionSignatureRows(map);
+  let changed = false;
+  const signatures = {};
+  Object.entries(map.signatures || {}).forEach(([systemId, rows]) => {
+    signatures[systemId] = rows.flatMap((signature) => {
+      if (signature.group === 'Wormhole' || assigned.get(Number(systemId))?.has(signature.id)) return [signature];
+      const lastSeen = Date.parse(signature.updatedAt);
+      if (!Number.isFinite(lastSeen)) {
+        changed = true;
+        return [{ ...signature, updatedAt }];
+      }
+      if (lastSeen + SIGNATURE_EXPIRY_MS <= timestamp) {
+        changed = true;
+        return [];
+      }
+      return [signature];
+    });
+  });
+  return changed ? { ...map, signatures, updatedAt } : map;
+}
+
+export function pruneExpiredMapItems(map, now = Date.now()) {
+  const timestamp = millisecondsNow(now);
+  return pruneExpiredSignatures(pruneExpiredConnections(map, timestamp), timestamp);
+}
+
+export function nextMapExpirationAt(map) {
+  const deadlines = (map.connections || [])
+    .filter((connection) => connection.kind !== 'gate')
+    .map((connection) => Date.parse(connection.expiresAt))
+    .filter(Number.isFinite);
+  const assigned = connectionSignatureRows(map);
+  Object.entries(map.signatures || {}).forEach(([systemId, rows]) => {
+    rows.forEach((signature) => {
+      if (signature.group === 'Wormhole' || assigned.get(Number(systemId))?.has(signature.id)) return;
+      const lastSeen = Date.parse(signature.updatedAt);
+      deadlines.push(Number.isFinite(lastSeen) ? lastSeen + SIGNATURE_EXPIRY_MS : 0);
+    });
+  });
+  return deadlines.length ? Math.min(...deadlines) : null;
 }
 
 export function mapRoutingConnections(map, graph, now = Date.now()) {

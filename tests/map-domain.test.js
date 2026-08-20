@@ -11,11 +11,14 @@ import {
   fitChainViewport,
   mapRoutingConnections,
   mapWormholeStepsForPath,
+  nextMapExpirationAt,
   normalizeMapState,
   observeCharacterMovements,
   parseScannerSignatures,
   preferredMapRoot,
   pruneExpiredConnections,
+  pruneExpiredMapItems,
+  pruneExpiredSignatures,
   removeMapConnection,
   removeMapSystem,
   updateConnectionCondition,
@@ -173,6 +176,43 @@ test('previous unresolved imports migrate from Unknown to Cosmic Signature', () 
     signatures: { 1: [{ id: 'OPU-480', group: 'Unknown', type: '', name: '' }] }
   }, graph);
   assert.equal(map.signatures[1][0].group, 'Cosmic Signature');
+});
+
+test('non-wormhole signatures expire three days after they were last seen', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = upsertSignatures(map, 1, [
+    { id: 'DAT-001', group: 'Data Site', updatedAt: '2026-08-17T12:00:00.000Z' },
+    { id: 'REL-002', group: 'Relic Site', updatedAt: '2026-08-17T12:00:00.001Z' },
+    { id: 'WHL-003', group: 'Wormhole', updatedAt: '2026-08-01T00:00:00.000Z' }
+  ], now);
+  assert.equal(nextMapExpirationAt(map), Date.parse(now()));
+  map = pruneExpiredSignatures(map, now);
+  assert.deepEqual(map.signatures[1].map((signature) => signature.id), ['REL-002', 'WHL-003']);
+});
+
+test('seeing a non-wormhole signature again refreshes its three-day lifetime', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'DAT-001', group: 'Data Site', updatedAt: '2026-08-17T11:00:00.000Z' }], now);
+  map = upsertSignatures(map, 1, [{ id: 'DAT-001', group: 'Data Site', updatedAt: now() }], now);
+  map = pruneExpiredSignatures(map, now);
+  assert.equal(map.signatures[1][0].updatedAt, now());
+});
+
+test('legacy signatures without an age start their three-day timer on migration', () => {
+  const map = pruneExpiredSignatures({
+    ...emptyMapState(),
+    signatures: { 1: [{ id: 'GAS-001', group: 'Gas Site', type: '', name: '', updatedAt: null }] }
+  }, now);
+  assert.equal(map.signatures[1][0].updatedAt, now());
+});
+
+test('assigned signatures are exempt from the three-day site cleanup', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'OLD-123', group: 'Cosmic Signature', updatedAt: '2026-08-01T00:00:00.000Z' }], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'OLD-123', () => '2026-08-01T00:00:00.000Z');
+  map = pruneExpiredMapItems(map, now);
+  assert.equal(map.signatures[1][0].id, 'OLD-123');
 });
 
 test('editing a signature updates its details and its connection-side reference', () => {

@@ -217,7 +217,7 @@ test('expired connection cleanup is persisted without deleting its systems', asy
   });
   view.map = storedMap;
 
-  assert.equal(await view.removeExpiredConnections({ render: false }), 1);
+  assert.equal(await view.removeExpiredMapItems({ render: false }), 1);
   assert.equal(storedMap.connections.length, 0);
   assert.deepEqual(storedMap.nodes.map((node) => node.id), [1, 2]);
   assert.deepEqual(storedMap.signatures[1], []);

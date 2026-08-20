@@ -7,11 +7,13 @@ import {
   computeChainLayout,
   emptyMapState,
   fitChainViewport,
+  nextMapExpirationAt,
   normalizeMapState,
   observeCharacterMovements,
   parseScannerSignatures,
   preferredMapRoot,
   pruneExpiredConnections,
+  pruneExpiredSignatures,
   removeMapConnection,
   removeMapSystem,
   updateConnectionCondition,
@@ -87,6 +89,10 @@ function connectionCountdownText(connection, now = Date.now()) {
   return `${connection.life === 'expired' ? 'Expired' : connection.life === 'under-1h' ? '<1 hour' : '<4 hours'} · auto-deletes in ${duration}`;
 }
 
+function signatureCount(map) {
+  return Object.values(map?.signatures || {}).reduce((count, rows) => count + rows.length, 0);
+}
+
 export class MapperView {
   constructor({ store, graph, toast, confirmAction, portraitUrl, activeCharacterId = null, onSystemSelected = () => {} }) {
     this.store = store;
@@ -112,7 +118,7 @@ export class MapperView {
     this.editingSignature = null;
     this.editingConnectionId = null;
     this.editingConnectionDraft = null;
-    this.connectionExpiryTimer = null;
+    this.mapExpiryTimer = null;
     this.connectionCountdownTimer = null;
     this.draggingSignature = null;
   }
@@ -123,7 +129,7 @@ export class MapperView {
       this.store.getSetting(MAP_VIEWPORT_KEY, null)
     ]);
     this.map = normalizeMapState(savedMap, this.graph);
-    await this.removeExpiredConnections({ notify: false, render: false });
+    await this.removeExpiredMapItems({ notify: false, render: false });
     let sessionViewport = null;
     try {
       sessionViewport = JSON.parse(sessionStorage.getItem(MAP_VIEWPORT_SESSION_KEY) || 'null');
@@ -143,7 +149,7 @@ export class MapperView {
     this.map = latest.nodes.some((node) => node.id === selectedSystemId)
       ? { ...latest, selectedSystemId }
       : latest;
-    await this.removeExpiredConnections({ notify: false, render: false });
+    await this.removeExpiredMapItems({ notify: false, render: false });
     this.render(this.characters);
     const newTrackedJumps = this.map.connections
       .filter((connection) => connection.kind === 'wormhole'
@@ -182,7 +188,7 @@ export class MapperView {
     this.renderToolbar();
     this.renderGraph();
     this.renderInspector();
-    this.scheduleConnectionExpiry();
+    this.scheduleMapExpiry();
   }
 
   setActiveCharacter(characterId, { fit = false, notify = true } = {}) {
@@ -573,30 +579,30 @@ export class MapperView {
     }
   }
 
-  scheduleConnectionExpiry() {
+  scheduleMapExpiry() {
     if (typeof window === 'undefined') return;
-    window.clearTimeout(this.connectionExpiryTimer);
-    const expirations = this.map.connections
-      .filter((connection) => connection.kind !== 'gate')
-      .map((connection) => Date.parse(connection.expiresAt))
-      .filter(Number.isFinite);
-    if (!expirations.length) {
-      this.connectionExpiryTimer = null;
+    window.clearTimeout(this.mapExpiryTimer);
+    const expiration = nextMapExpirationAt(this.map);
+    if (!Number.isFinite(expiration)) {
+      this.mapExpiryTimer = null;
       return;
     }
-    const delay = Math.min(2_147_000_000, Math.max(50, Math.min(...expirations) - Date.now() + 25));
-    this.connectionExpiryTimer = window.setTimeout(() => {
-      this.removeExpiredConnections().catch((error) => this.toast(error.message, 'error'));
+    const delay = Math.min(2_147_000_000, Math.max(50, expiration - Date.now() + 25));
+    this.mapExpiryTimer = window.setTimeout(() => {
+      this.removeExpiredMapItems().catch((error) => this.toast(error.message, 'error'));
     }, delay);
   }
 
-  async removeExpiredConnections({ notify = true, render = true } = {}) {
+  async removeExpiredMapItems({ notify = true, render = true } = {}) {
     const selectedSystemId = this.map.selectedSystemId;
-    let removed = 0;
+    let removedConnections = 0;
+    let removedSignatures = 0;
     const storedMap = await this.store.updateSetting(MAP_STATE_KEY, (value) => {
       const current = normalizeMapState(value, this.graph);
-      const next = pruneExpiredConnections(current);
-      removed = current.connections.length - next.connections.length;
+      const withoutExpiredConnections = pruneExpiredConnections(current);
+      const next = pruneExpiredSignatures(withoutExpiredConnections);
+      removedConnections = current.connections.length - withoutExpiredConnections.connections.length;
+      removedSignatures = signatureCount(withoutExpiredConnections) - signatureCount(next);
       const needsLifetimeMigration = (value?.connections || []).some((connection) => {
         const normalized = current.connections.find((candidate) => candidate.id === connectionId(connection.from, connection.to));
         return normalized && (connection.life !== normalized.life || connection.expiresAt !== normalized.expiresAt);
@@ -612,8 +618,14 @@ export class MapperView {
       this.editingConnectionId = null;
     }
     if (render) this.render();
-    if (removed && notify) this.toast(`${removed === 1 ? 'Wormhole connection' : `${removed} wormhole connections`} expired and ${removed === 1 ? 'was' : 'were'} removed.`);
-    return removed;
+    if (notify && (removedConnections || removedSignatures)) {
+      const removals = [
+        removedConnections ? removedConnections === 1 ? 'Wormhole connection' : `${removedConnections} wormhole connections` : '',
+        removedSignatures ? removedSignatures === 1 ? 'Signature' : `${removedSignatures} signatures` : ''
+      ].filter(Boolean).join(' and ');
+      this.toast(`${removals} expired and ${removedConnections + removedSignatures === 1 ? 'was' : 'were'} removed.`);
+    }
+    return removedConnections + removedSignatures;
   }
 
   async mutate(mutator, { fit = false } = {}) {
