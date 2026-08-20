@@ -1,0 +1,256 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  addMapSystem,
+  assignConnectionSignature,
+  connectedMapSystemIds,
+  computeChainLayout,
+  emptyMapState,
+  fitChainViewport,
+  normalizeMapState,
+  observeCharacterMovements,
+  parseScannerSignatures,
+  preferredMapRoot,
+  removeMapSystem,
+  upsertSignatures,
+  wormholeSignatureCandidates
+} from '../js/map-domain.js';
+
+const systems = new Map([
+  [1, { id: 1, name: 'Alpha', adjacent: [2] }],
+  [2, { id: 2, name: 'Beta', adjacent: [1] }],
+  [3, { id: 3, name: 'J123456', adjacent: [] }],
+  [4, { id: 4, name: 'J654321', adjacent: [] }]
+]);
+const graph = { get: (id) => systems.get(Number(id)) || null };
+const now = () => '2026-08-20T12:00:00.000Z';
+
+test('manual systems connect to the selected chain node without duplicate edges', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  assert.deepEqual(map.nodes.map((node) => node.id), [1, 3]);
+  assert.equal(map.connections.length, 1);
+  assert.equal(map.connections[0].id, '1:3');
+  assert.equal(map.rootId, 1);
+  assert.equal(map.selectedSystemId, 3);
+});
+
+test('manually selecting an auto-tracked root pins it against gate-follow replacement', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), { source: 'tracked' }, now).map;
+  map = addMapSystem(map, systems.get(1), {}, now).map;
+  map = { ...map, lastLocations: { 99: 1 } };
+  map = observeCharacterMovements(map, [{ id: 99, presence: { online: true }, location: { id: 2 } }], graph, now).map;
+  assert.deepEqual(map.nodes.map((node) => node.id), [1]);
+  assert.equal(map.nodes[0].source, 'manual');
+});
+
+test('live tracking follows gate travel until a non-gate jump creates a chain connection', () => {
+  const online = (id, locationId) => ({ id, presence: { online: true }, location: { id: locationId } });
+  let map = observeCharacterMovements(emptyMapState(), [online(99, 1)], graph, now).map;
+  assert.deepEqual(map.nodes.map((node) => node.id), [1]);
+
+  map = observeCharacterMovements(map, [online(99, 2)], graph, now).map;
+  assert.deepEqual(map.nodes.map((node) => node.id), [2]);
+  assert.equal(map.connections.length, 0);
+
+  const result = observeCharacterMovements(map, [online(99, 3)], graph, now);
+  assert.deepEqual(result.map.nodes.map((node) => node.id), [2, 3]);
+  assert.equal(result.map.connections.length, 1);
+  assert.equal(result.changes[0].type, 'connection');
+  assert.deepEqual(result.changes[1], {
+    type: 'wormhole-jump',
+    from: 2,
+    to: 3,
+    connectionId: '2:3',
+    characterId: 99
+  });
+});
+
+test('returning through an existing wormhole still emits a jump for the unmapped side', () => {
+  const online = (locationId) => ({ id: 99, presence: { online: true }, location: { id: locationId } });
+  let map = observeCharacterMovements(emptyMapState(), [online(1)], graph, now).map;
+  map = observeCharacterMovements(map, [online(3)], graph, now).map;
+  const result = observeCharacterMovements(map, [online(1)], graph, now);
+  assert.equal(result.map.connections.length, 1);
+  assert.deepEqual(result.changes, [{
+    type: 'wormhole-jump',
+    from: 3,
+    to: 1,
+    connectionId: '1:3',
+    characterId: 99
+  }]);
+});
+
+test('offline characters do not alter the chain or tracking cursor', () => {
+  const map = observeCharacterMovements(emptyMapState(), [{ id: 99, presence: { online: false }, location: { id: 3 } }], graph, now).map;
+  assert.equal(map.nodes.length, 0);
+  assert.deepEqual(map.lastLocations, {});
+});
+
+test('removing a system also removes attached connections and signatures', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 3, [{ id: 'ABC-123', group: 'Wormhole' }], now);
+  map = removeMapSystem(map, 3, now);
+  assert.deepEqual(map.nodes.map((node) => node.id), [1]);
+  assert.equal(map.connections.length, 0);
+  assert.equal(map.signatures[3], undefined);
+});
+
+test('scanner paste accepts EVE tab-separated rows and ignores unrelated text', () => {
+  const parsed = parseScannerSignatures([
+    'ABC-123\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t2.4 AU',
+    'not a scanner row',
+    'DEF-456\tCosmic Signature\tRelic Site\tRuined Sansha Temple Site\t100.0%'
+  ].join('\n'), now);
+  assert.deepEqual(parsed.map((signature) => [signature.id, signature.group, signature.type]), [
+    ['ABC-123', 'Wormhole', 'Unstable Wormhole'],
+    ['DEF-456', 'Relic Site', 'Ruined Sansha Temple Site']
+  ]);
+});
+
+test('scanner paste reads mapped results and discards strength and distance columns', () => {
+  const parsed = parseScannerSignatures([
+    'XVB-704\tCosmic Signature\tData Site\tUnsecured Perimeter Transponder Farm \t100.0%\t20.39 AU',
+    'CFA-844\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t20.64 AU',
+    'AZN-690\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t3.93 AU',
+    'THV-835\tCosmic Signature\tGas Site\tToken Perimeter Reservoir\t100.0%\t32.37 AU',
+    'DLW-225\tCosmic Signature\tRelic Site\tRuined Angel Monument Site\t100.0%\t1,863 km',
+    'OPU-480\tCosmic Signature\t\t\t0.0%\t16.34 AU'
+  ].join('\n'), now);
+
+  assert.deepEqual(parsed.map(({ id, group, type, name }) => ({ id, group, type, name })), [
+    { id: 'XVB-704', group: 'Data Site', type: 'Unsecured Perimeter Transponder Farm', name: 'Unsecured Perimeter Transponder Farm' },
+    { id: 'CFA-844', group: 'Wormhole', type: 'Unstable Wormhole', name: 'Unstable Wormhole' },
+    { id: 'AZN-690', group: 'Wormhole', type: 'Unstable Wormhole', name: 'Unstable Wormhole' },
+    { id: 'THV-835', group: 'Gas Site', type: 'Token Perimeter Reservoir', name: 'Token Perimeter Reservoir' },
+    { id: 'DLW-225', group: 'Relic Site', type: 'Ruined Angel Monument Site', name: 'Ruined Angel Monument Site' },
+    { id: 'OPU-480', group: 'Cosmic Signature', type: '', name: '' }
+  ]);
+  assert.equal(JSON.stringify(parsed).includes('20.39 AU'), false);
+  assert.equal(JSON.stringify(parsed).includes('1,863 km'), false);
+  assert.equal(JSON.stringify(parsed).includes('100.0%'), false);
+});
+
+test('previous unresolved imports migrate from Unknown to Cosmic Signature', () => {
+  const map = normalizeMapState({
+    nodes: [{ id: 1 }],
+    signatures: { 1: [{ id: 'OPU-480', group: 'Unknown', type: '', name: '' }] }
+  }, graph);
+  assert.equal(map.signatures[1][0].group, 'Cosmic Signature');
+});
+
+test('wormhole prompt candidates exclude sites and signatures used by other connections', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = addMapSystem(map, systems.get(4), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [
+    { id: 'AAA-111', group: 'Wormhole', type: 'Unstable Wormhole' },
+    { id: 'BBB-222', group: 'Wormhole', type: 'Unstable Wormhole' },
+    { id: 'CCC-333', group: 'Data Site', type: 'Unsecured Site' }
+  ], now);
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA-111', now);
+  assert.deepEqual(wormholeSignatureCandidates(map, 1, '1:4').map((signature) => signature.id), ['BBB-222']);
+});
+
+test('assigning a jump signature labels the correct connection side and records manual IDs', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 3, 'xyz-987', now);
+  assert.equal(map.connections[0].fromSignature, '');
+  assert.equal(map.connections[0].toSignature, 'XYZ-987');
+  assert.deepEqual(map.signatures[3][0], {
+    id: 'XYZ-987',
+    group: 'Wormhole',
+    type: '',
+    name: '',
+    updatedAt: now()
+  });
+});
+
+test('chain layout puts the root on top and adjacent branches below', () => {
+  const nodes = [{ id: 1 }, { id: 3 }, { id: 4 }];
+  const connections = [{ from: 1, to: 3 }, { from: 1, to: 4 }];
+  const positions = computeChainLayout(nodes, connections, 1);
+  assert.equal(positions.get(1).y, 0);
+  assert.equal(positions.get(3).y, 126);
+  assert.equal(positions.get(4).y, 126);
+  assert.notEqual(positions.get(3).x, positions.get(4).x);
+});
+
+test('character chain focus excludes disconnected mapped components', () => {
+  const visible = connectedMapSystemIds(
+    [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+    [{ from: 1, to: 3 }, { from: 2, to: 4 }],
+    1
+  );
+  assert.deepEqual([...visible].sort((left, right) => left - right), [1, 3]);
+});
+
+test('map fit anchors the root one em from the top and centered', () => {
+  const positions = computeChainLayout(
+    [{ id: 1 }, { id: 3 }, { id: 4 }],
+    [{ from: 1, to: 3 }, { from: 1, to: 4 }],
+    1
+  );
+  const viewport = fitChainViewport(
+    positions,
+    1,
+    { width: 1000, height: 700 },
+    { width: 176, height: 72 },
+    { topGap: 16 }
+  );
+  const root = positions.get(1);
+  assert.equal(viewport.y + root.y * viewport.scale, 16);
+  assert.equal(viewport.x + (root.x + 88) * viewport.scale, 500);
+});
+
+test('map fit restores a remembered zoom while retaining the root anchor', () => {
+  const positions = computeChainLayout(
+    [{ id: 1 }, { id: 3 }, { id: 4 }],
+    [{ from: 1, to: 3 }, { from: 1, to: 4 }],
+    1
+  );
+  const viewport = fitChainViewport(
+    positions,
+    1,
+    { width: 1000, height: 700 },
+    { width: 176, height: 72 },
+    { topGap: 16, preferredScale: 0.82 }
+  );
+  const root = positions.get(1);
+  assert.equal(viewport.scale, 0.82);
+  assert.equal(viewport.y + root.y * viewport.scale, 16);
+  assert.equal(viewport.x + (root.x + 88) * viewport.scale, 500);
+});
+
+test('the tracked root follows its pilot through a wormhole', () => {
+  const online = (locationId) => ({ id: 99, presence: { online: true }, location: { id: locationId } });
+  let map = observeCharacterMovements(emptyMapState(), [online(1)], graph, now).map;
+  map = observeCharacterMovements(map, [online(3)], graph, now).map;
+  assert.equal(map.rootId, 3);
+  assert.equal(map.selectedSystemId, 3);
+  assert.equal(map.connections.length, 1);
+});
+
+test('an occupied selected system overrides a stale saved root', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = { ...map, rootId: 1, selectedSystemId: 3 };
+  const characters = [{ id: 99, presence: { online: true }, location: { id: 3 } }];
+  assert.equal(preferredMapRoot(map, characters), 3);
+  assert.equal(computeChainLayout(map.nodes, map.connections, preferredMapRoot(map, characters)).get(3).y, 0);
+});
+
+test('an occupied saved root remains stable when another pilot is elsewhere', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = { ...map, rootId: 1, selectedSystemId: 4 };
+  const characters = [
+    { id: 99, presence: { online: true }, location: { id: 1 } },
+    { id: 100, presence: { online: true }, location: { id: 3 } }
+  ];
+  assert.equal(preferredMapRoot(map, characters), 1);
+});

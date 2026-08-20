@@ -11,7 +11,7 @@
   <meta property="og:site_name" content="Splash">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://splash.zzeve.com/">
-  <meta property="og:title" content="Splash — EVE Online Route Planner">
+  <meta property="og:title" content="Splash | EVE Online Route Planner">
   <meta property="og:description" content="Getting lost is optional. Plan, assign, and track routes for every pilot in your browser.">
   <meta property="og:image" content="https://splash.zzeve.com/og-image.png">
   <meta property="og:image:secure_url" content="https://splash.zzeve.com/og-image.png">
@@ -21,14 +21,14 @@
   <meta property="og:image:alt" content="Splash logo and slogan beside an EVE route map rendered in blue and acid green.">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Splash — EVE Online Route Planner">
+  <meta name="twitter:title" content="Splash | EVE Online Route Planner">
   <meta name="twitter:description" content="Getting lost is optional. Plan, assign, and track routes for every pilot in your browser.">
   <meta name="twitter:image" content="https://splash.zzeve.com/og-image.png">
   <meta name="twitter:image:alt" content="Splash logo and slogan beside an EVE route map rendered in blue and acid green.">
 
-  <title>Splash — EVE Online Route Planner</title>
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-  <link rel="icon" type="image/png" href="./favicon.png">
+  <title>Splash | EVE Online Route Planner</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=2">
+  <link rel="icon" type="image/png" href="./favicon.png?v=2">
   <link rel="stylesheet" href="./css/app.css">
   <script type="module" src="./js/app.js"></script>
 </head>
@@ -43,6 +43,11 @@
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M12 21v-8"></path><path d="m12 14-6-6"></path><path d="M6 12V8h4"></path><path d="m12 14 6-6"></path><path d="M14 8h4v4"></path></svg>
         </span> Routes
+      </button>
+      <button class="nav-item" type="button" data-view-target="map">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="18" cy="18" r="2.5"></circle><path d="m8.3 10.9 7.4-3.8M8.3 13.1l7.4 3.8"></path></svg>
+        </span> Map <span class="nav-beta" aria-label="Beta">β</span>
       </button>
       <button class="nav-item" type="button" data-view-target="characters">
         <span class="nav-icon nav-character-icon" aria-hidden="true"><img src="https://images.evetech.net/characters/1/portrait?size=64" alt=""></span> Characters
@@ -121,6 +126,39 @@
           </section>
         </div>
       </section>
+    </section>
+
+    <section id="view-map" class="app-view map-view" data-view="map" hidden>
+      <div class="map-workspace">
+        <section class="map-stage" aria-label="Wormhole mapper">
+          <div class="map-canvas-shell">
+            <svg id="chain-map" class="chain-map" aria-label="Wormhole chain map"></svg>
+            <div id="map-empty-state" class="map-empty-state">
+              <div class="map-empty-orbit" aria-hidden="true"><span></span></div>
+              <h2>Start a chain</h2>
+              <p>Connect an online pilot and let Splash follow the first non-gate jump.</p>
+            </div>
+            <label class="map-auto-track map-auto-track-floating" title="Add a connection when a tracked pilot moves between systems without using a stargate">
+              <input id="map-auto-track" type="checkbox" checked>
+              <span class="toggle-slider" aria-hidden="true"></span>
+              <span><strong>Auto-map</strong><small>non-gate jumps</small></span>
+            </label>
+            <div class="map-zoom-controls" aria-label="Map view controls">
+              <button id="map-fit" type="button" aria-label="Fit chain" title="Fit chain"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
+              <button id="map-zoom-in" type="button" aria-label="Zoom in">＋</button>
+              <button id="map-zoom-out" type="button" aria-label="Zoom out">−</button>
+            </div>
+            <div class="map-legend" aria-label="Connection legend">
+              <span><i class="is-stable"></i> stable</span>
+              <span><i class="is-eol"></i> end of life</span>
+              <span><i class="is-critical"></i> critical mass</span>
+            </div>
+          </div>
+        </section>
+        <aside id="map-inspector" class="map-inspector" aria-label="Selected system details">
+          <div id="map-inspector-content"></div>
+        </aside>
+      </div>
     </section>
 
     <section id="view-characters" class="app-view" data-view="characters" hidden>
@@ -579,6 +617,22 @@
         <p id="clear-routes-status" class="modal-status" aria-live="polite"></p>
         <button class="button button-ghost" type="button" data-close-dialog="clear-routes-dialog">Cancel</button>
         <button id="clear-routes-submit" class="button button-primary" type="submit" disabled>Clear Route</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="map-jump-dialog" class="modal map-jump-dialog" aria-labelledby="map-jump-title">
+    <form id="map-jump-form" autocomplete="off">
+      <div class="modal-header"><div><div class="eyebrow">Wormhole detected</div><h2 id="map-jump-title">Which signature did you use?</h2></div></div>
+      <div class="modal-body">
+        <p id="map-jump-message" class="map-jump-message"></p>
+        <div id="map-jump-route" class="map-jump-route" aria-label="Detected jump"></div>
+        <fieldset id="map-jump-options" class="map-jump-options"><legend>Origin signature</legend><div id="map-jump-signatures"></div></fieldset>
+        <label class="map-jump-manual"><span>Enter a different signature</span><input id="map-jump-signature-manual" maxlength="7" placeholder="ABC-123" spellcheck="false" inputmode="text"></label>
+      </div>
+      <div class="modal-footer">
+        <button id="map-jump-skip" class="button button-ghost" type="button">Skip for now</button>
+        <button id="map-jump-submit" class="button button-primary" type="submit" disabled>Map connection</button>
       </div>
     </form>
   </dialog>

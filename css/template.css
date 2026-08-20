@@ -1,0 +1,29 @@
+/*
+ * Deployment-specific template styles
+ *
+ * This file loads after app.css on both the main application and the EVE SSO
+ * callback. Any selector may be overridden here. The existing CSS variables
+ * are the quickest way to replace the color system without restyling every
+ * component.
+ *
+ * Example:
+ *
+ * :root {
+ *   --accent: #ff8a3d;
+ *   --accent-strong: #e96d20;
+ *   --accent-ink: #241006;
+ *   --blue: #bf9cff;
+ * }
+ *
+ * :root[data-theme="light"] {
+ *   --accent: #d75b0a;
+ *   --accent-strong: #b94800;
+ * }
+ *
+ * @media (prefers-color-scheme: light) {
+ *   :root:not([data-theme="dark"]) {
+ *     --accent: #d75b0a;
+ *     --accent-strong: #b94800;
+ *   }
+ * }
+ */

@@ -23,7 +23,8 @@ Routes, settings, character authorizations, and last-known locations are stored 
 - Uses Jita as the initial default system to avoid; the default list is editable in Settings.
 - Uses active public Thera and Turnur connections from EVE-Scout when selected.
 - Stages route delivery around wormhole traversals and displays the signature to use.
-- Can submit every calculated gate system to override EVE’s own route choice.
+- Includes a local Tripwire-style wormhole chain map with live pilot presence, non-gate jump detection, signature import, and connection health.
+- Can submit every calculated gate system to override EVE's own route choice.
 - Imports and exports route plans without including character tokens.
 
 See [Routing and route delivery](docs/routing.md) for the complete routing model.
@@ -112,10 +113,14 @@ js/route-planner.js         Universe graph and A* routing
 js/esi.js                   EVE SSO and ESI client
 js/eve-scout.js             Thera and Turnur connection client
 js/presence.js              Online, location, and ship synchronization
+js/map-domain.js            Wormhole map data, scanner parsing, and layout
+js/map-view.js              SVG chain map and system inspector
 js/db.js                    IndexedDB storage
 scripts/                    SDE build, validation, and update tools
 tests/                      Node test suite
 ```
+
+See [Wormhole mapping](docs/mapping.md) for mapper behavior, auto-mapping safeguards, visual conventions, and the boundary between the local map and a future shared map.
 
 ## Privacy
 

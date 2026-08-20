@@ -19,6 +19,8 @@ import {
   serializeRoutes,
   systemSecurityColor
 } from './domain.js';
+import { MapperView } from './map-view.js';
+import { parseViewHash, viewHash } from './navigation.js';
 import { UniverseGraph } from './route-planner.js';
 import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnlineCharacterData } from './presence.js';
 
@@ -35,6 +37,8 @@ const esi = new ESIClient(store);
 const eveScout = new EveScoutClient();
 const state = {
   graph: null,
+  mapper: null,
+  activeCharacterId: null,
   systemSearch: [],
   routes: [],
   characters: [],
@@ -399,23 +403,65 @@ function applyAppearance() {
   else document.documentElement.dataset.theme = state.settings.theme;
 }
 
-function showView(name) {
+function currentViewName() {
+  return document.querySelector('.app-view:not([hidden])')?.dataset.view || 'routes';
+}
+
+function writeViewHash(hash, { replace = false } = {}) {
+  if (window.location.hash === hash) return;
+  const url = `${window.location.pathname}${window.location.search}${hash}`;
+  window.history[replace ? 'replaceState' : 'pushState']({}, '', url);
+}
+
+function showView(name, { updateHash = true, replaceHash = false, scrollBehavior = 'smooth' } = {}) {
+  const viewName = ['routes', 'map', 'characters', 'settings'].includes(name) ? name : 'routes';
   document.querySelectorAll('.app-view').forEach((view) => {
-    const active = view.dataset.view === name;
+    const active = view.dataset.view === viewName;
     view.hidden = !active;
     view.classList.toggle('is-active', active);
   });
   document.querySelectorAll('[data-view-target]').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.viewTarget === name);
+    button.classList.toggle('is-active', button.dataset.viewTarget === viewName);
   });
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: scrollBehavior });
+  if (viewName === 'map') state.mapper?.activate();
+  if (updateHash) writeViewHash(viewHash(viewName, state.mapper?.map.selectedSystemId), { replace: replaceHash });
+}
+
+function restoreViewFromHash({ canonicalize = true } = {}) {
+  const target = parseViewHash(window.location.hash);
+  if (target.view === 'map' && target.systemId) state.mapper?.selectSystem(target.systemId, { notify: false });
+  showView(target.view, { updateHash: false, scrollBehavior: 'auto' });
+  if (canonicalize) writeViewHash(viewHash(target.view, state.mapper?.map.selectedSystemId), { replace: true });
+}
+
+function updateSelectedMapHash(systemId) {
+  if (currentViewName() !== 'map') return;
+  writeViewHash(viewHash('map', systemId), { replace: true });
+}
+
+async function switchActiveCharacter(characterId) {
+  const character = state.characters.find((candidate) => Number(candidate.id) === Number(characterId));
+  if (!character || state.activeCharacterId === character.id) return false;
+  state.activeCharacterId = character.id;
+  await store.setSetting('active-character-id', character.id);
+  state.mapper?.setActiveCharacter(character.id, { fit: currentViewName() === 'map' });
+  renderHeader();
+  if (currentViewName() === 'map') {
+    const selected = state.mapper?.visibleNodes.some((node) => node.id === state.mapper.map.selectedSystemId)
+      ? state.mapper.map.selectedSystemId
+      : null;
+    writeViewHash(viewHash('map', selected), { replace: true });
+  }
+  return true;
 }
 
 function renderHeader() {
   $('nav-character-count').textContent = state.characters.length;
-  $('header-characters').innerHTML = state.characters.map((character) =>
-    `<img class="${isCharacterOnline(character) ? '' : 'is-offline'}" src="${portraitUrl(character.id, 64)}" alt="${escapeHtml(character.name)}" title="${escapeHtml(character.name)} · ${isCharacterOnline(character) ? 'online' : 'offline'}">`
+  const portraits = state.characters.map((character) =>
+    `<button class="avatar-character ${character.id === state.activeCharacterId ? 'is-active' : ''}" type="button" data-active-character="${character.id}" aria-label="View ${escapeHtml(character.name)}" aria-pressed="${character.id === state.activeCharacterId}" title="View ${escapeHtml(character.name)}${character.location?.name ? ` · ${escapeHtml(character.location.name)}` : ''} · ${isCharacterOnline(character) ? 'online' : 'offline'}"><img class="${isCharacterOnline(character) ? '' : 'is-offline'}" src="${portraitUrl(character.id, 64)}" alt=""></button>`
   ).join('');
+  $('header-characters').innerHTML = portraits;
 }
 
 function routeOriginLabel(route) {
@@ -1058,6 +1104,7 @@ function renderAll() {
   renderRoutes();
   renderCharacters();
   renderSettings();
+  state.mapper?.render(state.characters);
   if ($('route-assignment').open) renderRouteAssignment();
   if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
   const openDetail = currentDetailRoute();
@@ -1147,6 +1194,7 @@ function renderPilotData() {
   renderHeader();
   renderRoutes();
   renderCharacters();
+  state.mapper?.render(state.characters);
   if ($('route-assignment').open) renderRouteAssignment();
   if ($('ad-hoc-route-dialog').open) renderAdHocRouteDialog();
   const openDetail = currentDetailRoute();
@@ -1189,6 +1237,7 @@ async function refreshOnlineLocations() {
   state.presenceSyncing = true;
   try {
     await Promise.allSettled(onlineCharacters.map((character) => refreshCharacterLocation(character)));
+    await state.mapper?.observeCharacters(state.characters);
     await autoRemoveCompletedPilots();
     await recalculateAssignedRoutes();
     renderPilotData();
@@ -1207,6 +1256,7 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
   setBusy(button, true, 'Syncing…');
   try {
     const results = await Promise.allSettled(state.characters.map((character) => refreshCharacterPresence(character, true)));
+    await state.mapper?.observeCharacters(state.characters);
     await autoRemoveCompletedPilots();
     await recalculateAssignedRoutes();
     renderHeader();
@@ -2728,6 +2778,15 @@ async function removeCharacter(characterId) {
   if (!await confirmAction('Remove this character?', `${character.name}’s local tokens and route assignments will be removed.`, 'Remove character')) return;
   await store.delete('characters', character.id);
   state.characters = state.characters.filter((item) => item.id !== character.id);
+  if (state.activeCharacterId === character.id) {
+    const nextCharacter = state.characters.find(isCharacterOnline) || state.characters[0] || null;
+    state.activeCharacterId = null;
+    if (nextCharacter) await switchActiveCharacter(nextCharacter.id);
+    else {
+      await store.setSetting('active-character-id', null);
+      if (state.mapper) state.mapper.activeCharacterId = null;
+    }
+  }
   const changedRoutes = state.routes.filter((route) => route.assignedCharacterIds.includes(character.id)).map((route) => ({
     ...route,
     assignedCharacterIds: route.assignedCharacterIds.filter((id) => id !== character.id),
@@ -2815,6 +2874,11 @@ async function eraseAllData() {
 function bindEvents() {
   bindSystemAutocomplete();
   document.querySelectorAll('[data-view-target]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.viewTarget)));
+  window.addEventListener('hashchange', () => restoreViewFromHash());
+  $('header-characters').addEventListener('click', (event) => {
+    const character = event.target.closest('[data-active-character]');
+    if (character) switchActiveCharacter(character.dataset.activeCharacter).catch((error) => toast(error.message, 'error'));
+  });
   $('header-ad-hoc-route').addEventListener('click', () => openAdHocRouteDialog());
   $('header-clear-routes').addEventListener('click', openClearRoutesDialog);
   $('header-new-route').addEventListener('click', () => openRouteEditor());
@@ -3289,6 +3353,7 @@ function bindEvents() {
   window.addEventListener('storage', async () => {
     state.routes = await repairEncodedRouteText(await store.getAll('routes'));
     state.characters = await store.getAll('characters');
+    await state.mapper?.reload();
     renderAll();
   });
 }
@@ -3311,7 +3376,8 @@ async function initialize() {
       routeStatus,
       routeSort,
       pilotProgressSort,
-      autoRemoveComplete
+      autoRemoveComplete,
+      activeCharacterId
     ] = await Promise.all([
       UniverseGraph.load('./data/universe.json'),
       store.getAll('routes'),
@@ -3328,11 +3394,20 @@ async function initialize() {
       store.getSetting('route-status-filter', 'all'),
       store.getSetting('route-sort', 'updated'),
       store.getSetting('pilot-progress-sort', 'jumps'),
-      store.getSetting('auto-remove-complete', false)
+      store.getSetting('auto-remove-complete', false),
+      store.getSetting('active-character-id', null)
     ]);
     state.graph = graph;
     state.routes = await repairEncodedRouteText(routes);
     state.characters = characters.sort((a, b) => a.name.localeCompare(b.name));
+    const savedActiveCharacter = state.characters.find((character) => character.id === Number(activeCharacterId));
+    state.activeCharacterId = savedActiveCharacter?.id
+      || state.characters.find(isCharacterOnline)?.id
+      || state.characters[0]?.id
+      || null;
+    if (state.activeCharacterId && state.activeCharacterId !== Number(activeCharacterId)) {
+      await store.setSetting('active-character-id', state.activeCharacterId);
+    }
     state.settings = {
       theme,
       routeProgressDisplay: routeProgressDisplay === 'expanded' ? 'expanded' : 'compact',
@@ -3351,10 +3426,28 @@ async function initialize() {
     $('pilot-progress-sort').value = state.settings.pilotProgressSort;
     $('auto-remove-complete').checked = state.settings.autoRemoveComplete;
     applyAppearance();
+    state.mapper = new MapperView({
+      store,
+      graph,
+      toast,
+      confirmAction,
+      portraitUrl,
+      activeCharacterId: state.activeCharacterId,
+      onSystemSelected: updateSelectedMapHash
+    });
+    await state.mapper.init();
     prepareSystemAutocomplete();
     bindEvents();
     await autoRemoveCompletedPilots({ notify: false });
     renderAll();
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('authorized')) {
+      toast(`${params.get('authorized')} connected.`);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('authorized');
+      history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+    }
+    restoreViewFromHash();
     const hasWormholeRoute = alwaysWormholeHubs().length
       || state.routes.some((route) => normalizeWormholeHubs(route.wormholeHubs).length)
       || state.characters.some((character) => normalizeWormholeHubs(character.directRoute?.wormholeHubs).length);
@@ -3366,11 +3459,6 @@ async function initialize() {
       } catch (error) {
         console.warn('Could not preload live EVE-Scout connections:', error);
       }
-    }
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('authorized')) {
-      toast(`${params.get('authorized')} connected.`);
-      history.replaceState({}, '', window.location.pathname);
     }
     if (state.characters.length) refreshAllLocations({ quiet: true });
     state.onlineTimer = window.setInterval(refreshOnlineStatuses, ONLINE_REFRESH_MS);
