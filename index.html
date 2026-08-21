@@ -142,6 +142,11 @@
               <button type="button" data-map-connection-style="pipe" aria-pressed="true" aria-label="Pipe connections" title="Pipe connections">|</button>
               <button type="button" data-map-connection-style="curve" aria-pressed="false" aria-label="Curved connections" title="Curved connections">∿</button>
             </div>
+            <label class="map-layout-spacing" title="Adjust map spacing">
+              <span>Compact</span>
+              <input id="map-layout-spacing" type="range" min="0" max="100" step="1" value="100" aria-label="Map spacing" aria-valuetext="100% expanded">
+              <span>Expanded</span>
+            </label>
             <label class="map-auto-track map-auto-track-floating" title="Add a connection when a tracked pilot moves between systems without using a stargate">
               <input id="map-auto-track" type="checkbox" checked>
               <span class="toggle-slider" aria-hidden="true"></span>

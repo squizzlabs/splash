@@ -15,6 +15,7 @@ import {
   pruneExpiredConnections,
   pruneExpiredSignatures,
   removeMapConnection,
+  removeMapSignature,
   removeMapSystem,
   resetOfflineCharacterTracking,
   updateConnectionCondition,
@@ -28,6 +29,10 @@ const MAP_VIEWPORT_KEY = 'mapper-viewport';
 const MAP_VIEWPORT_SESSION_KEY = 'splash:mapper-viewport';
 const NODE_WIDTH = 176;
 const NODE_HEIGHT = 72;
+const MAP_LAYOUT_SPACING = Object.freeze({
+  expanded: Object.freeze({ columnGap: 220, levelGap: 126 }),
+  compact: Object.freeze({ columnGap: 184, levelGap: 88, packing: 'contour' })
+});
 const SIGNATURE_ID_PATTERN = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/;
 const SIGNATURE_GROUPS = ['Cosmic Signature', 'Wormhole', 'Relic Site', 'Data Site', 'Gas Site', 'Combat Site', 'Unknown'];
 const CONNECTION_LIFE_OPTIONS = [
@@ -88,6 +93,29 @@ function connectionCountdownText(connection, now = Date.now()) {
   const seconds = totalSeconds % 60;
   const duration = hours ? `${hours}h ${minutes}m` : `${minutes}m ${String(seconds).padStart(2, '0')}s`;
   return `${connection.life === 'expired' ? 'Expired' : connection.life === 'under-1h' ? '<1 hour' : '<4 hours'} · auto-deletes in ${duration}`;
+}
+
+export function normalizeMapLayoutSpacing(value) {
+  const spacing = Number(value);
+  return Number.isFinite(spacing) ? Math.min(100, Math.max(0, spacing)) : 100;
+}
+
+export function computeMapLayout(nodes, connections, rootId, layoutSpacing = 100) {
+  const blend = normalizeMapLayoutSpacing(layoutSpacing) / 100;
+  const compact = computeChainLayout(nodes, connections, rootId, MAP_LAYOUT_SPACING.compact);
+  if (blend === 0) return compact;
+  const expanded = computeChainLayout(nodes, connections, rootId, MAP_LAYOUT_SPACING.expanded);
+  if (blend === 1) return expanded;
+  const positions = new Map();
+  expanded.forEach((expandedPosition, id) => {
+    const compactPosition = compact.get(id) || expandedPosition;
+    positions.set(id, {
+      ...expandedPosition,
+      x: compactPosition.x + (expandedPosition.x - compactPosition.x) * blend,
+      y: compactPosition.y + (expandedPosition.y - compactPosition.y) * blend
+    });
+  });
+  return positions;
 }
 
 export function mapConnectionPath(from, to, options = {}) {
@@ -240,7 +268,12 @@ export class MapperView {
     if (this.layoutRootId && !visibleIds.has(Number(this.map.selectedSystemId))) {
       this.map = { ...this.map, selectedSystemId: this.layoutRootId };
     }
-    this.positions = computeChainLayout(this.visibleNodes, this.visibleConnections, this.layoutRootId);
+    this.positions = computeMapLayout(
+      this.visibleNodes,
+      this.visibleConnections,
+      this.layoutRootId,
+      this.map.layoutSpacing
+    );
     this.renderToolbar();
     this.renderGraph();
     this.renderInspector();
@@ -265,6 +298,14 @@ export class MapperView {
     document.querySelectorAll('[data-map-connection-style]').forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.mapConnectionStyle === this.map.connectionStyle));
     });
+    const layoutSpacing = document.getElementById('map-layout-spacing');
+    if (layoutSpacing) {
+      layoutSpacing.value = String(normalizeMapLayoutSpacing(this.map.layoutSpacing));
+      const valueText = layoutSpacing.value === '0'
+        ? 'Compact'
+        : layoutSpacing.value === '100' ? 'Expanded' : `${layoutSpacing.value}% expanded`;
+      layoutSpacing.setAttribute('aria-valuetext', valueText);
+    }
   }
 
   renderGraph() {
@@ -837,6 +878,19 @@ export class MapperView {
         this.mutate((map) => ({ ...map, connectionStyle })).catch((error) => this.toast(error.message, 'error'));
       });
     });
+    const layoutSpacing = document.getElementById('map-layout-spacing');
+    layoutSpacing?.addEventListener('input', (event) => {
+      const value = normalizeMapLayoutSpacing(event.target.value);
+      const preferredScale = this.viewport.scale;
+      this.map = { ...this.map, layoutSpacing: value };
+      this.render();
+      this.fit({ preferredScale, persist: false });
+    });
+    layoutSpacing?.addEventListener('change', (event) => {
+      const value = normalizeMapLayoutSpacing(event.target.value);
+      this.mutate((map) => ({ ...map, layoutSpacing: value }), { fit: true })
+        .catch((error) => this.toast(error.message, 'error'));
+    });
     document.getElementById('map-jump-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.submitJumpPrompt().catch((error) => this.toast(error.message, 'error'));
@@ -963,7 +1017,10 @@ export class MapperView {
       const removeSignature = event.target.closest('[data-map-remove-signature]');
       if (removeSignature) {
         this.editingSignature = null;
-        return this.mutate((map) => ({ ...map, signatures: { ...map.signatures, [map.selectedSystemId]: (map.signatures[map.selectedSystemId] || []).filter((signature) => signature.id !== removeSignature.dataset.mapRemoveSignature) } }));
+        return this.mutate(
+          (map) => removeMapSignature(map, map.selectedSystemId, removeSignature.dataset.mapRemoveSignature),
+          { fit: true }
+        );
       }
       const action = event.target.closest('[data-map-action]')?.dataset.mapAction;
       if (action === 'remove-system') {

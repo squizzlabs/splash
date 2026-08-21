@@ -20,6 +20,7 @@ import {
   pruneExpiredMapItems,
   pruneExpiredSignatures,
   removeMapConnection,
+  removeMapSignature,
   removeMapSystem,
   updateConnectionCondition,
   updateMapSignature,
@@ -39,8 +40,14 @@ const now = () => '2026-08-20T12:00:00.000Z';
 
 test('map connection style defaults to pipe and preserves the curve option', () => {
   assert.equal(emptyMapState().connectionStyle, 'pipe');
+  assert.equal(emptyMapState().layoutSpacing, 100);
   assert.equal(normalizeMapState({ connectionStyle: 'curve' }, graph).connectionStyle, 'curve');
+  assert.equal(normalizeMapState({ layoutSpacing: 35 }, graph).layoutSpacing, 35);
+  assert.equal(normalizeMapState({ layoutSpacing: -20 }, graph).layoutSpacing, 0);
+  assert.equal(normalizeMapState({ layoutSpacing: 120 }, graph).layoutSpacing, 100);
+  assert.equal(normalizeMapState({ layoutDensity: 'compact' }, graph).layoutSpacing, 0);
   assert.equal(normalizeMapState({ connectionStyle: 'unknown' }, graph).connectionStyle, 'pipe');
+  assert.equal(normalizeMapState({ layoutDensity: 'expanded' }, graph).layoutSpacing, 100);
 });
 
 test('manual systems connect to the selected chain node without duplicate edges', () => {
@@ -154,6 +161,32 @@ test('connection cleanup preserves a signature still referenced by another conne
   map = removeMapConnection(map, '1:3', now);
   assert.equal(map.connections.length, 1);
   assert.equal(map.signatures[1][0].id, 'AAA-111');
+});
+
+test('removing an assigned signature also removes its connection and opposite signature', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = addMapSystem(map, systems.get(4), { connectFrom: 1 }, now).map;
+  map = assignConnectionSignature(map, '1:3', 1, 'AAA-111', now);
+  map = assignConnectionSignature(map, '1:3', 3, 'BBB-222', now);
+  map = assignConnectionSignature(map, '1:4', 1, 'CCC-333', now);
+
+  map = removeMapSignature(map, 1, 'AAA-111', now);
+
+  assert.deepEqual(map.connections.map((connection) => connection.id), ['1:4']);
+  assert.deepEqual(map.signatures[1].map((signature) => signature.id), ['CCC-333']);
+  assert.deepEqual(map.signatures[3], []);
+});
+
+test('removing an unassigned signature leaves map connections intact', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = upsertSignatures(map, 1, [{ id: 'DAT-123', group: 'Data Site' }], now);
+
+  map = removeMapSignature(map, 1, 'DAT-123', now);
+
+  assert.equal(map.connections.length, 1);
+  assert.deepEqual(map.signatures[1], []);
 });
 
 test('scanner paste accepts EVE tab-separated rows and ignores unrelated text', () => {
@@ -410,6 +443,36 @@ test('chain layout keeps each parent centered over a contiguous subtree', () => 
   assert.ok(positions.get(4).x < positions.get(5).x);
   assert.equal(positions.get(2).parentId, 1);
   assert.equal(positions.get(7).parentId, 3);
+});
+
+test('compact chain layout packs uneven subtree contours without card overlap', () => {
+  const nodes = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((id) => ({ id }));
+  const connections = [
+    { from: 1, to: 2 },
+    { from: 1, to: 3 },
+    { from: 1, to: 4 },
+    { from: 2, to: 5 },
+    { from: 5, to: 6 },
+    { from: 3, to: 7 },
+    { from: 3, to: 8 },
+    { from: 8, to: 9 }
+  ];
+  const expanded = computeChainLayout(nodes, connections, 1);
+  const compact = computeChainLayout(nodes, connections, 1, { columnGap: 184, levelGap: 88, packing: 'contour' });
+  const width = (positions) => Math.max(...[...positions.values()].map(({ x }) => x)) - Math.min(...[...positions.values()].map(({ x }) => x));
+  assert.ok(width(compact) < width(expanded) * .8);
+  assert.equal(compact.get(2).y, 88);
+  const levels = new Map();
+  compact.forEach((position) => {
+    if (!levels.has(position.depth)) levels.set(position.depth, []);
+    levels.get(position.depth).push(position.x);
+  });
+  levels.forEach((columns) => {
+    columns.sort((left, right) => left - right);
+    for (let index = 1; index < columns.length; index += 1) {
+      assert.ok(columns[index] - columns[index - 1] >= 184);
+    }
+  });
 });
 
 test('character chain focus excludes disconnected mapped components', () => {

@@ -12,10 +12,11 @@ Splash includes a browser-local wormhole chain mapper alongside its route planne
 - After a detected wormhole jump, prompt for the signature used in the origin system. The picker lists that system's scanned wormholes, excludes signatures already assigned to other exits, accepts a manually entered signature ID, and queues simultaneous pilot jumps. A return trip can label the other side of the same connection.
 - Record optional system aliases.
 - Record connection signature, wormhole type, life, remaining mass, and ship-size class.
+- Removing an assigned signature also removes its corresponding mapped connection and the signature recorded at the opposite end.
 - Add individual cosmic signatures or import tab-separated rows copied from EVE's probe scanner with Ctrl+V, the Paste scan button, or the manual paste field. Strength and distance columns are ignored.
 - Persist the map in the same IndexedDB `kv` store used by the rest of Splash.
 
-The renderer uses native SVG rather than a graph library. Layout is a live-rooted tree: the focused pilot's current system stays at the top, each jump moves one row downward, and every parent's descendants occupy one contiguous horizontal subtree. The map's `|` and `∿` control switches between Tripwire-style shared trunks and the original curved connections, and remembers the choice locally. Connection life, mass, and size are encoded on the line so degraded links can be read without opening the inspector.
+The renderer uses native SVG rather than a graph library. Layout is a live-rooted tree: the focused pilot's current system stays at the top, each jump moves one row downward, and every parent's descendants occupy one contiguous horizontal subtree. The map's `|` and `∿` control switches between Tripwire-style shared trunks and the original curved connections. A Compact-to-Expanded slider continuously blends between contour packing that tucks shallow branches into unused space and the roomy leaf grid, without shrinking or overlapping system cards. Both choices are remembered locally. Connection life, mass, and size are encoded on the line so degraded links can be read without opening the inspector.
 
 ## Auto-mapping safeguards
 

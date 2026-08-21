@@ -70,6 +70,7 @@ export function emptyMapState() {
     selectedSystemId: null,
     autoTrack: true,
     connectionStyle: 'pipe',
+    layoutSpacing: 100,
     updatedAt: null
   };
 }
@@ -173,6 +174,7 @@ export function normalizeMapState(value, graph) {
   Object.entries(value.lastLocations || {}).forEach(([characterId, systemId]) => {
     if (Number.isSafeInteger(Number(characterId)) && graph?.get(Number(systemId))) lastLocations[characterId] = Number(systemId);
   });
+  const savedLayoutSpacing = typeof value.layoutSpacing === 'number' ? value.layoutSpacing : Number.NaN;
   return {
     ...base,
     name: cleanText(value.name, 60) || base.name,
@@ -184,6 +186,9 @@ export function normalizeMapState(value, graph) {
     selectedSystemId,
     autoTrack: value.autoTrack !== false,
     connectionStyle: value.connectionStyle === 'curve' ? 'curve' : 'pipe',
+    layoutSpacing: Number.isFinite(savedLayoutSpacing)
+      ? Math.min(100, Math.max(0, savedLayoutSpacing))
+      : value.layoutDensity === 'compact' ? 0 : 100,
     updatedAt: value.updatedAt || null
   };
 }
@@ -297,6 +302,27 @@ function removeConnections(map, shouldRemove, timestamp) {
 export function removeMapConnection(map, connectionIdValue, now = () => new Date().toISOString()) {
   const id = String(connectionIdValue || '');
   return removeConnections(map, (connection) => connection.id === id, isoNow(now));
+}
+
+export function removeMapSignature(map, systemId, signatureId, now = () => new Date().toISOString()) {
+  const id = Number(systemId);
+  const signature = cleanText(signatureId, 7).toUpperCase();
+  const rows = map.signatures?.[id] || [];
+  if (!rows.some((candidate) => candidate.id === signature)) return map;
+  const timestamp = isoNow(now);
+  const withoutConnections = removeConnections(map, (connection) => {
+    if (connection.from !== id && connection.to !== id) return false;
+    const reference = connection.from === id ? connection.fromSignature : connection.toSignature;
+    return signatureRowIdForReference(map, id, reference) === signature;
+  }, timestamp);
+  return {
+    ...withoutConnections,
+    signatures: {
+      ...withoutConnections.signatures,
+      [id]: (withoutConnections.signatures[id] || []).filter((candidate) => candidate.id !== signature)
+    },
+    updatedAt: timestamp
+  };
 }
 
 export function removeMapSystem(map, systemId, now = () => new Date().toISOString()) {
@@ -705,29 +731,76 @@ export function computeChainLayout(nodes, connections, rootId, options = {}) {
       });
     }
 
-    let nextLeafColumn = 0;
     const columns = new Map();
-    const placeSubtree = (id) => {
-      const childIds = children.get(id) || [];
-      if (!childIds.length) {
-        const column = nextLeafColumn;
-        nextLeafColumn += 1;
+    let componentWidth;
+    if (options.packing === 'contour') {
+      const packSubtree = (id) => {
+        const childIds = children.get(id) || [];
+        if (!childIds.length) {
+          return { coordinates: new Map([[id, 0]]), left: [0], right: [0] };
+        }
+        const childLayouts = childIds.map(packSubtree);
+        const shifts = [];
+        const combinedLeft = [];
+        const combinedRight = [];
+        childLayouts.forEach((layout, index) => {
+          let shift = 0;
+          if (index) {
+            const overlappingDepths = Math.min(combinedRight.length, layout.left.length);
+            for (let depth = 0; depth < overlappingDepths; depth += 1) {
+              shift = Math.max(shift, combinedRight[depth] + columnGap - layout.left[depth]);
+            }
+          }
+          shifts.push(shift);
+          layout.left.forEach((value, depth) => {
+            const shifted = value + shift;
+            combinedLeft[depth] = combinedLeft[depth] == null ? shifted : Math.min(combinedLeft[depth], shifted);
+            const shiftedRight = layout.right[depth] + shift;
+            combinedRight[depth] = combinedRight[depth] == null ? shiftedRight : Math.max(combinedRight[depth], shiftedRight);
+          });
+        });
+        const rootColumn = (shifts[0] + shifts[shifts.length - 1]) / 2;
+        const coordinates = new Map([[id, 0]]);
+        childLayouts.forEach((layout, index) => {
+          layout.coordinates.forEach((value, childId) => coordinates.set(childId, value + shifts[index] - rootColumn));
+        });
+        return {
+          coordinates,
+          left: [0, ...combinedLeft.map((value) => value - rootColumn)],
+          right: [0, ...combinedRight.map((value) => value - rootColumn)]
+        };
+      };
+      const packed = packSubtree(start);
+      const values = [...packed.coordinates.values()];
+      const minColumn = Math.min(...values);
+      const maxColumn = Math.max(...values);
+      packed.coordinates.forEach((value, id) => columns.set(id, value - minColumn));
+      componentWidth = maxColumn - minColumn + columnGap;
+    } else {
+      let nextLeafColumn = 0;
+      const placeSubtree = (id) => {
+        const childIds = children.get(id) || [];
+        if (!childIds.length) {
+          const column = nextLeafColumn;
+          nextLeafColumn += 1;
+          columns.set(id, column);
+          return column;
+        }
+        const childColumns = childIds.map(placeSubtree);
+        const column = (childColumns[0] + childColumns[childColumns.length - 1]) / 2;
         columns.set(id, column);
         return column;
-      }
-      const childColumns = childIds.map(placeSubtree);
-      const column = (childColumns[0] + childColumns[childColumns.length - 1]) / 2;
-      columns.set(id, column);
-      return column;
-    };
-    placeSubtree(start);
+      };
+      placeSubtree(start);
+      componentWidth = Math.max(1, nextLeafColumn) * columnGap + columnGap;
+    }
     componentIds.forEach((id) => positions.set(id, {
-      x: componentLeft + columns.get(id) * columnGap,
+      x: componentLeft + columns.get(id) * (options.packing === 'contour' ? 1 : columnGap),
       y: depths.get(id) * levelGap,
       depth: depths.get(id),
       parentId: parents.get(id)
     }));
-    componentLeft += Math.max(1, nextLeafColumn) * columnGap + columnGap;
+    componentLeft += componentWidth;
   });
   return positions;
 }

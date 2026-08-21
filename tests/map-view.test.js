@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { emptyMapState } from '../js/map-domain.js';
-import { curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, MapperView } from '../js/map-view.js';
+import { computeMapLayout, curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, normalizeMapLayoutSpacing, MapperView } from '../js/map-view.js';
 
 test('the jump prompt keeps Map connection enabled for custom signatures', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -12,6 +12,40 @@ test('the jump prompt keeps Map connection enabled for custom signatures', () =>
   assert.doesNotMatch(submit, /\sdisabled(?:\s|>)/);
   assert.match(html, /data-map-connection-style="pipe"[^>]*>\|<\/button>/);
   assert.match(html, /data-map-connection-style="curve"[^>]*>∿<\/button>/);
+  assert.match(html, /id="map-layout-spacing"[^>]*type="range"[^>]*min="0"[^>]*max="100"/);
+});
+
+test('map spacing slider blends continuously between compact and expanded layouts', () => {
+  const nodes = [1, 2, 3, 4, 5].map((id) => ({ id }));
+  const connections = [
+    { from: 1, to: 2 },
+    { from: 1, to: 3 },
+    { from: 2, to: 4 },
+    { from: 4, to: 5 }
+  ];
+  const compact = computeMapLayout(nodes, connections, 1, 0);
+  const middle = computeMapLayout(nodes, connections, 1, 50);
+  const expanded = computeMapLayout(nodes, connections, 1, 100);
+  nodes.forEach(({ id }) => {
+    assert.equal(middle.get(id).x, (compact.get(id).x + expanded.get(id).x) / 2);
+    assert.equal(middle.get(id).y, (compact.get(id).y + expanded.get(id).y) / 2);
+  });
+  assert.ok(Math.max(...[...compact.values()].map(({ x }) => x)) < Math.max(...[...expanded.values()].map(({ x }) => x)));
+  [compact, middle, expanded].forEach((positions) => {
+    const levels = new Map();
+    positions.forEach(({ depth, x }) => {
+      if (!levels.has(depth)) levels.set(depth, []);
+      levels.get(depth).push(x);
+    });
+    levels.forEach((columns) => {
+      columns.sort((left, right) => left - right);
+      for (let index = 1; index < columns.length; index += 1) {
+        assert.ok(columns[index] - columns[index - 1] >= 176);
+      }
+    });
+  });
+  assert.equal(normalizeMapLayoutSpacing(-1), 0);
+  assert.equal(normalizeMapLayoutSpacing(101), 100);
 });
 
 test('map connections use right-angle paths', () => {
