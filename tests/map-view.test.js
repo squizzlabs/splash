@@ -3,13 +3,15 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { emptyMapState } from '../js/map-domain.js';
-import { mapConnectionPath, mapConnectionPaths, MapperView } from '../js/map-view.js';
+import { curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, MapperView } from '../js/map-view.js';
 
 test('the jump prompt keeps Map connection enabled for custom signatures', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const submit = html.match(/<button id="map-jump-submit"[^>]*>/)?.[0] || '';
   assert.ok(submit);
   assert.doesNotMatch(submit, /\sdisabled(?:\s|>)/);
+  assert.match(html, /data-map-connection-style="pipe"[^>]*>\|<\/button>/);
+  assert.match(html, /data-map-connection-style="curve"[^>]*>∿<\/button>/);
 });
 
 test('map connections use right-angle paths', () => {
@@ -24,6 +26,17 @@ test('map connections use right-angle paths', () => {
   assert.equal(
     mapConnectionPath({ x: 0, y: 126, depth: 1 }, { x: 220, y: 126, depth: 1 }),
     'M 176 162 L 220 162'
+  );
+});
+
+test('curved connections retain the original committed geometry', () => {
+  assert.equal(
+    curvedMapConnectionPath({ x: 0, y: 0, depth: 0 }, { x: 220, y: 126, depth: 1 }),
+    'M 88 72 C 88 100.08, 308 97.92, 308 126'
+  );
+  assert.equal(
+    curvedMapConnectionPath({ x: 0, y: 126, depth: 1 }, { x: 220, y: 126, depth: 1 }),
+    'M 176 162 C 222 162, 174 162, 220 162'
   );
 });
 

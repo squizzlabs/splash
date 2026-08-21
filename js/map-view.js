@@ -111,6 +111,28 @@ export function mapConnectionPath(from, to, options = {}) {
   return `M ${startX} ${startY} L ${endX} ${endY}`;
 }
 
+export function curvedMapConnectionPath(from, to) {
+  if (!from || !to) return '';
+  if (from.depth !== to.depth) {
+    const parent = from.depth < to.depth ? from : to;
+    const child = from.depth < to.depth ? to : from;
+    const startX = parent.x + NODE_WIDTH / 2;
+    const startY = parent.y + NODE_HEIGHT;
+    const endX = child.x + NODE_WIDTH / 2;
+    const endY = child.y;
+    const bend = Math.max(28, (endY - startY) * .52);
+    return `M ${startX} ${startY} C ${startX} ${startY + bend}, ${endX} ${endY - bend}, ${endX} ${endY}`;
+  }
+  const leftToRight = from.x <= to.x;
+  const startX = from.x + (leftToRight ? NODE_WIDTH : 0);
+  const endX = to.x + (leftToRight ? 0 : NODE_WIDTH);
+  const startY = from.y + NODE_HEIGHT / 2;
+  const endY = to.y + NODE_HEIGHT / 2;
+  const bend = Math.max(46, Math.abs(endX - startX) * .48);
+  const direction = leftToRight ? 1 : -1;
+  return `M ${startX} ${startY} C ${startX + bend * direction} ${startY}, ${endX - bend * direction} ${endY}, ${endX} ${endY}`;
+}
+
 export function mapConnectionPaths(connections, positions) {
   const paths = new Map();
   (connections || []).forEach((connection, index) => {
@@ -240,6 +262,9 @@ export class MapperView {
   renderToolbar() {
     const autoTrack = document.getElementById('map-auto-track');
     if (autoTrack) autoTrack.checked = this.map.autoTrack;
+    document.querySelectorAll('[data-map-connection-style]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.mapConnectionStyle === this.map.connectionStyle));
+    });
   }
 
   renderGraph() {
@@ -263,7 +288,9 @@ export class MapperView {
       if (!pilotGroups.has(id)) pilotGroups.set(id, []);
       pilotGroups.get(id).push(character);
     });
-    const connectionPaths = mapConnectionPaths(this.visibleConnections, this.positions);
+    const pipePaths = this.map.connectionStyle === 'pipe'
+      ? mapConnectionPaths(this.visibleConnections, this.positions)
+      : null;
     const edges = this.visibleConnections.map((connection) => {
       const from = this.positions.get(connection.from);
       const to = this.positions.get(connection.to);
@@ -273,8 +300,8 @@ export class MapperView {
       const interaction = connection.kind === 'gate'
         ? ''
         : `data-map-connection="${connection.id}" role="button" tabindex="0" aria-label="Edit wormhole connection between ${svgEscape(fromSystem?.name || connection.from)} and ${svgEscape(toSystem?.name || connection.to)}"`;
-      const path = connectionPaths.get(connection.id) || mapConnectionPath(from, to);
-      return `<g class="map-connection-group is-life-${connection.life} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
+      const path = pipePaths?.get(connection.id) || curvedMapConnectionPath(from, to);
+      return `<g class="map-connection-group is-style-${this.map.connectionStyle} is-life-${connection.life} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
         <path class="map-connection-hit" d="${path}"></path>
         <path class="map-connection-line" d="${path}"></path>
       </g>`;
@@ -804,6 +831,12 @@ export class MapperView {
     document.getElementById('map-zoom-in')?.addEventListener('click', () => this.zoom(1.18));
     document.getElementById('map-zoom-out')?.addEventListener('click', () => this.zoom(1 / 1.18));
     document.getElementById('map-auto-track')?.addEventListener('change', (event) => this.mutate((map) => ({ ...map, autoTrack: event.target.checked })));
+    document.querySelectorAll('[data-map-connection-style]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const connectionStyle = button.dataset.mapConnectionStyle === 'curve' ? 'curve' : 'pipe';
+        this.mutate((map) => ({ ...map, connectionStyle })).catch((error) => this.toast(error.message, 'error'));
+      });
+    });
     document.getElementById('map-jump-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.submitJumpPrompt().catch((error) => this.toast(error.message, 'error'));

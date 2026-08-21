@@ -37,6 +37,12 @@ const systems = new Map([
 const graph = { get: (id) => systems.get(Number(id)) || null };
 const now = () => '2026-08-20T12:00:00.000Z';
 
+test('map connection style defaults to pipe and preserves the curve option', () => {
+  assert.equal(emptyMapState().connectionStyle, 'pipe');
+  assert.equal(normalizeMapState({ connectionStyle: 'curve' }, graph).connectionStyle, 'curve');
+  assert.equal(normalizeMapState({ connectionStyle: 'unknown' }, graph).connectionStyle, 'pipe');
+});
+
 test('manual systems connect to the selected chain node without duplicate edges', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;

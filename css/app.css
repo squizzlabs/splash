@@ -264,6 +264,12 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
 .map-auto-track input:checked + .toggle-slider::after { left: 18px; background: var(--accent-ink); }
 .map-auto-track input:focus-visible + .toggle-slider { outline: 2px solid var(--blue); outline-offset: 2px; }
 .map-auto-track-floating { position: absolute; top: 14px; right: 14px; z-index: 3; padding: 8px 10px; background: rgb(16 23 31 / 94%); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 30%); backdrop-filter: blur(8px); }
+.map-connection-style { position: absolute; top: 14px; left: 14px; z-index: 3; display: flex; overflow: hidden; background: rgb(16 23 31 / 94%); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 30%); backdrop-filter: blur(8px); }
+.map-connection-style button { width: 36px; height: 34px; padding: 0; color: var(--muted-strong); background: transparent; border: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 21px; font-weight: 800; line-height: 1; }
+.map-connection-style button + button { border-left: 1px solid var(--line); }
+.map-connection-style button:hover { color: var(--text); background: var(--panel-soft); }
+.map-connection-style button[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, var(--panel-strong)); }
+.map-connection-style button:focus-visible { position: relative; outline: 2px solid var(--blue); outline-offset: -3px; }
 .map-canvas-shell {
   position: relative;
   min-height: 0;

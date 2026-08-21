@@ -69,6 +69,7 @@ export function emptyMapState() {
     rootId: null,
     selectedSystemId: null,
     autoTrack: true,
+    connectionStyle: 'pipe',
     updatedAt: null
   };
 }
@@ -182,6 +183,7 @@ export function normalizeMapState(value, graph) {
     rootId,
     selectedSystemId,
     autoTrack: value.autoTrack !== false,
+    connectionStyle: value.connectionStyle === 'curve' ? 'curve' : 'pipe',
     updatedAt: value.updatedAt || null
   };
 }

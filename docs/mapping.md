@@ -15,7 +15,7 @@ Splash includes a browser-local wormhole chain mapper alongside its route planne
 - Add individual cosmic signatures or import tab-separated rows copied from EVE's probe scanner with Ctrl+V, the Paste scan button, or the manual paste field. Strength and distance columns are ignored.
 - Persist the map in the same IndexedDB `kv` store used by the rest of Splash.
 
-The renderer uses native SVG rather than a graph library. Layout is a live-rooted tree: the focused pilot's current system stays at the top, each jump moves one row downward, and every parent's descendants occupy one contiguous horizontal subtree. Like Tripwire's organization-chart layout, sibling connections share one vertical trunk and horizontal branch rail before dropping into each child. Connection life, mass, and size are encoded on the line so degraded links can be read without opening the inspector.
+The renderer uses native SVG rather than a graph library. Layout is a live-rooted tree: the focused pilot's current system stays at the top, each jump moves one row downward, and every parent's descendants occupy one contiguous horizontal subtree. The map's `|` and `∿` control switches between Tripwire-style shared trunks and the original curved connections, and remembers the choice locally. Connection life, mass, and size are encoded on the line so degraded links can be read without opening the inspector.
 
 ## Auto-mapping safeguards
 
