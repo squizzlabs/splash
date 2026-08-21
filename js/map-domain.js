@@ -683,29 +683,49 @@ export function computeChainLayout(nodes, connections, rootId, options = {}) {
   let componentLeft = 0;
   starts.forEach((start) => {
     if (visited.has(start)) return;
-    const queue = [{ id: start, depth: 0 }];
-    const levels = new Map();
+    const queue = [start];
+    const componentIds = [];
+    const depths = new Map([[start, 0]]);
+    const parents = new Map([[start, null]]);
+    const children = new Map();
     visited.add(start);
     while (queue.length) {
       const current = queue.shift();
-      if (!levels.has(current.depth)) levels.set(current.depth, []);
-      levels.get(current.depth).push(current.id);
-      adjacency.get(current.id).forEach((neighbor) => {
+      componentIds.push(current);
+      children.set(current, []);
+      adjacency.get(current).forEach((neighbor) => {
         if (visited.has(neighbor)) return;
         visited.add(neighbor);
-        queue.push({ id: neighbor, depth: current.depth + 1 });
+        parents.set(neighbor, current);
+        depths.set(neighbor, depths.get(current) + 1);
+        children.get(current).push(neighbor);
+        queue.push(neighbor);
       });
     }
-    const widest = Math.max(...[...levels.values()].map((level) => level.length), 1);
-    levels.forEach((level, depth) => {
-      const offset = ((widest - level.length) * columnGap) / 2;
-      level.forEach((id, index) => positions.set(id, {
-        x: componentLeft + offset + index * columnGap,
-        y: depth * levelGap,
-        depth
-      }));
-    });
-    componentLeft += widest * columnGap + columnGap;
+
+    let nextLeafColumn = 0;
+    const columns = new Map();
+    const placeSubtree = (id) => {
+      const childIds = children.get(id) || [];
+      if (!childIds.length) {
+        const column = nextLeafColumn;
+        nextLeafColumn += 1;
+        columns.set(id, column);
+        return column;
+      }
+      const childColumns = childIds.map(placeSubtree);
+      const column = (childColumns[0] + childColumns[childColumns.length - 1]) / 2;
+      columns.set(id, column);
+      return column;
+    };
+    placeSubtree(start);
+    componentIds.forEach((id) => positions.set(id, {
+      x: componentLeft + columns.get(id) * columnGap,
+      y: depths.get(id) * levelGap,
+      depth: depths.get(id),
+      parentId: parents.get(id)
+    }));
+    componentLeft += Math.max(1, nextLeafColumn) * columnGap + columnGap;
   });
   return positions;
 }

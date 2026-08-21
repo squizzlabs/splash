@@ -3,13 +3,59 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { emptyMapState } from '../js/map-domain.js';
-import { MapperView } from '../js/map-view.js';
+import { mapConnectionPath, mapConnectionPaths, MapperView } from '../js/map-view.js';
 
 test('the jump prompt keeps Map connection enabled for custom signatures', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const submit = html.match(/<button id="map-jump-submit"[^>]*>/)?.[0] || '';
   assert.ok(submit);
   assert.doesNotMatch(submit, /\sdisabled(?:\s|>)/);
+});
+
+test('map connections use right-angle paths', () => {
+  assert.equal(
+    mapConnectionPath({ x: 0, y: 0, depth: 0 }, { x: 220, y: 126, depth: 1 }),
+    'M 88 72 L 88 99 L 308 99 L 308 126'
+  );
+  assert.equal(
+    mapConnectionPath({ x: 0, y: 0, depth: 0 }, { x: 0, y: 126, depth: 1 }),
+    'M 88 72 L 88 126'
+  );
+  assert.equal(
+    mapConnectionPath({ x: 0, y: 126, depth: 1 }, { x: 220, y: 126, depth: 1 }),
+    'M 176 162 L 220 162'
+  );
+});
+
+test('sibling connections share a Tripwire-style trunk and branch rail', () => {
+  const positions = new Map([
+    [1, { x: 440, y: 0, depth: 0 }],
+    [2, { x: 0, y: 126, depth: 1 }],
+    [3, { x: 220, y: 126, depth: 1 }]
+  ]);
+  const paths = mapConnectionPaths([
+    { id: '1:2', from: 1, to: 2 },
+    { id: '1:3', from: 1, to: 3 }
+  ], positions);
+  assert.equal(paths.get('1:2'), 'M 528 72 L 528 99 L 88 99 L 88 126');
+  assert.equal(paths.get('1:3'), 'M 528 72 L 528 99 L 308 99 L 308 126');
+});
+
+test('wide sibling groups use one centered branch rail without crossings', () => {
+  const positions = new Map([
+    [1, { x: 605, y: 0, depth: 0 }],
+    [2, { x: 110, y: 126, depth: 1 }],
+    [3, { x: 660, y: 126, depth: 1 }],
+    [4, { x: 1100, y: 126, depth: 1 }]
+  ]);
+  const paths = mapConnectionPaths([
+    { id: '1:2', from: 1, to: 2 },
+    { id: '1:3', from: 1, to: 3 },
+    { id: '1:4', from: 1, to: 4 }
+  ], positions);
+  assert.equal(paths.get('1:2'), 'M 693 72 L 693 99 L 198 99 L 198 126');
+  assert.equal(paths.get('1:3'), 'M 693 72 L 693 99 L 748 99 L 748 126');
+  assert.equal(paths.get('1:4'), 'M 693 72 L 693 99 L 1188 99 L 1188 126');
 });
 
 test('the inspector folds connection settings into the matching signature editor', () => {

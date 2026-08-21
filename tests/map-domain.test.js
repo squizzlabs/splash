@@ -388,6 +388,24 @@ test('chain layout puts the root on top and adjacent branches below', () => {
   assert.notEqual(positions.get(3).x, positions.get(4).x);
 });
 
+test('chain layout keeps each parent centered over a contiguous subtree', () => {
+  const nodes = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id }));
+  const connections = [
+    { from: 1, to: 2 },
+    { from: 1, to: 3 },
+    { from: 2, to: 4 },
+    { from: 3, to: 5 },
+    { from: 3, to: 6 },
+    { from: 3, to: 7 }
+  ];
+  const positions = computeChainLayout(nodes, connections, 1);
+  assert.equal(positions.get(2).x, positions.get(4).x);
+  assert.equal(positions.get(3).x, (positions.get(5).x + positions.get(7).x) / 2);
+  assert.ok(positions.get(4).x < positions.get(5).x);
+  assert.equal(positions.get(2).parentId, 1);
+  assert.equal(positions.get(7).parentId, 3);
+});
+
 test('character chain focus excludes disconnected mapped components', () => {
   const visible = connectedMapSystemIds(
     [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],

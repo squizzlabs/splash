@@ -90,6 +90,39 @@ function connectionCountdownText(connection, now = Date.now()) {
   return `${connection.life === 'expired' ? 'Expired' : connection.life === 'under-1h' ? '<1 hour' : '<4 hours'} · auto-deletes in ${duration}`;
 }
 
+export function mapConnectionPath(from, to, options = {}) {
+  if (!from || !to) return '';
+  if (from.depth !== to.depth) {
+    const parent = from.depth < to.depth ? from : to;
+    const child = from.depth < to.depth ? to : from;
+    const startX = Number.isFinite(options.parentPortX) ? options.parentPortX : parent.x + NODE_WIDTH / 2;
+    const startY = parent.y + NODE_HEIGHT;
+    const endX = Number.isFinite(options.childPortX) ? options.childPortX : child.x + NODE_WIDTH / 2;
+    const endY = child.y;
+    if (startX === endX) return `M ${startX} ${startY} L ${endX} ${endY}`;
+    const branchY = Number.isFinite(options.branchY) ? options.branchY : startY + (endY - startY) / 2;
+    return `M ${startX} ${startY} L ${startX} ${branchY} L ${endX} ${branchY} L ${endX} ${endY}`;
+  }
+  const leftToRight = from.x <= to.x;
+  const startX = from.x + (leftToRight ? NODE_WIDTH : 0);
+  const endX = to.x + (leftToRight ? 0 : NODE_WIDTH);
+  const startY = from.y + NODE_HEIGHT / 2;
+  const endY = to.y + NODE_HEIGHT / 2;
+  return `M ${startX} ${startY} L ${endX} ${endY}`;
+}
+
+export function mapConnectionPaths(connections, positions) {
+  const paths = new Map();
+  (connections || []).forEach((connection, index) => {
+    const from = positions.get(connection.from);
+    const to = positions.get(connection.to);
+    if (!from || !to) return;
+    const key = connection.id || `${connection.from}:${connection.to}:${index}`;
+    paths.set(key, mapConnectionPath(from, to));
+  });
+  return paths;
+}
+
 function signatureCount(map) {
   return Object.values(map?.signatures || {}).reduce((count, rows) => count + rows.length, 0);
 }
@@ -230,39 +263,17 @@ export class MapperView {
       if (!pilotGroups.has(id)) pilotGroups.set(id, []);
       pilotGroups.get(id).push(character);
     });
+    const connectionPaths = mapConnectionPaths(this.visibleConnections, this.positions);
     const edges = this.visibleConnections.map((connection) => {
       const from = this.positions.get(connection.from);
       const to = this.positions.get(connection.to);
       if (!from || !to) return '';
-      let startX;
-      let startY;
-      let endX;
-      let endY;
-      let path;
       const fromSystem = this.graph.get(connection.from);
       const toSystem = this.graph.get(connection.to);
       const interaction = connection.kind === 'gate'
         ? ''
         : `data-map-connection="${connection.id}" role="button" tabindex="0" aria-label="Edit wormhole connection between ${svgEscape(fromSystem?.name || connection.from)} and ${svgEscape(toSystem?.name || connection.to)}"`;
-      if (from.depth !== to.depth) {
-        const parent = from.depth < to.depth ? from : to;
-        const child = from.depth < to.depth ? to : from;
-        startX = parent.x + NODE_WIDTH / 2;
-        startY = parent.y + NODE_HEIGHT;
-        endX = child.x + NODE_WIDTH / 2;
-        endY = child.y;
-        const bend = Math.max(28, (endY - startY) * .52);
-        path = `M ${startX} ${startY} C ${startX} ${startY + bend}, ${endX} ${endY - bend}, ${endX} ${endY}`;
-      } else {
-        const leftToRight = from.x <= to.x;
-        startX = from.x + (leftToRight ? NODE_WIDTH : 0);
-        endX = to.x + (leftToRight ? 0 : NODE_WIDTH);
-        startY = from.y + NODE_HEIGHT / 2;
-        endY = to.y + NODE_HEIGHT / 2;
-        const bend = Math.max(46, Math.abs(endX - startX) * .48);
-        const direction = leftToRight ? 1 : -1;
-        path = `M ${startX} ${startY} C ${startX + bend * direction} ${startY}, ${endX - bend * direction} ${endY}, ${endX} ${endY}`;
-      }
+      const path = connectionPaths.get(connection.id) || mapConnectionPath(from, to);
       return `<g class="map-connection-group is-life-${connection.life} is-mass-${connection.mass} is-size-${connection.size}" ${interaction}>
         <path class="map-connection-hit" d="${path}"></path>
         <path class="map-connection-line" d="${path}"></path>
