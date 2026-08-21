@@ -1448,6 +1448,7 @@ async function refreshOnlineStatuses() {
   state.presenceSyncing = true;
   try {
     await Promise.allSettled(state.characters.map((character) => refreshCharacterOnline(character, true)));
+    await state.mapper?.observeCharacters(state.characters, { trackMovements: false });
     renderPilotData();
   } finally {
     finishPilotSync();
@@ -1500,6 +1501,7 @@ async function refreshAllLocations({ quiet = false, button = null } = {}) {
   state.presenceSyncing = true;
   setBusy(button, true, 'Syncing…');
   try {
+    await state.mapper?.observeCharacters(state.characters, { trackMovements: false });
     const results = await Promise.allSettled(state.characters.map((character) => refreshCharacterPresence(character, true)));
     await state.mapper?.observeCharacters(state.characters);
     await autoRemoveCompletedPilots();

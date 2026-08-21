@@ -23,7 +23,7 @@ ESI provides a character's current solar system but does not identify how the ch
 
 - A known stargate move advances the tracking cursor and does not create a wormhole edge.
 - A system change with no stargate adjacency creates a connection and asks which origin-side wormhole signature was used. The mapper never guesses between multiple signatures with the same generic name.
-- Offline characters do not update the tracking cursor.
+- Both system observations must occur while the pilot is online. Seeing a pilot offline clears their movement cursor, so reconnecting in another system does not create a connection across the offline gap.
 
 Jump bridges, cynos, filaments, and other non-gate travel can therefore look like a wormhole to a browser-only observer. Automatically created connections are intentionally unclassified until a mapper supplies signature and type details.
 

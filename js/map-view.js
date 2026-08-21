@@ -16,6 +16,7 @@ import {
   pruneExpiredSignatures,
   removeMapConnection,
   removeMapSystem,
+  resetOfflineCharacterTracking,
   updateConnectionCondition,
   updateMapSignature,
   upsertSignatures,
@@ -441,7 +442,7 @@ export class MapperView {
     if (!this.hasFit) requestAnimationFrame(() => this.fit({ preferredScale: this.rememberedScale, persist: false }));
   }
 
-  async observeCharacters(characters) {
+  async observeCharacters(characters, { trackMovements = true } = {}) {
     this.characters = characters;
     const previousSelection = this.map.selectedSystemId;
     let changes = [];
@@ -451,7 +452,9 @@ export class MapperView {
       const current = latest.nodes.some((node) => node.id === previousSelection)
         ? { ...latest, selectedSystemId: previousSelection }
         : latest;
-      const result = observeCharacterMovements(current, characters, this.graph);
+      const result = trackMovements
+        ? observeCharacterMovements(current, characters, this.graph)
+        : { map: resetOfflineCharacterTracking(current, characters), changes: [] };
       changes = result.changes;
       changed = result.map !== current;
       return changed ? result.map : storedMap || current;

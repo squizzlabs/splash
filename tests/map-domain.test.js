@@ -94,10 +94,25 @@ test('returning through an existing wormhole still emits a jump for the unmapped
   }]);
 });
 
-test('offline characters do not alter the chain or tracking cursor', () => {
+test('offline characters do not add to the chain or create a tracking cursor', () => {
   const map = observeCharacterMovements(emptyMapState(), [{ id: 99, presence: { online: false }, location: { id: 3 } }], graph, now).map;
   assert.equal(map.nodes.length, 0);
   assert.deepEqual(map.lastLocations, {});
+});
+
+test('an offline observation breaks movement tracking before the pilot reconnects elsewhere', () => {
+  const online = (locationId) => ({ id: 99, presence: { online: true }, location: { id: locationId } });
+  const offline = (locationId) => ({ id: 99, presence: { online: false }, location: { id: locationId } });
+  let map = observeCharacterMovements(emptyMapState(), [online(1)], graph, now).map;
+
+  map = observeCharacterMovements(map, [offline(1)], graph, now).map;
+  assert.deepEqual(map.lastLocations, {});
+
+  const result = observeCharacterMovements(map, [online(3)], graph, now);
+  assert.deepEqual(result.map.nodes.map((node) => node.id), [1, 3]);
+  assert.equal(result.map.connections.length, 0);
+  assert.deepEqual(result.map.lastLocations, { 99: 3 });
+  assert.deepEqual(result.changes, [{ type: 'system', systemId: 3, characterId: 99 }]);
 });
 
 test('removing a system also removes attached connections and signatures', () => {

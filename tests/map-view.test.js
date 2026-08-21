@@ -110,6 +110,47 @@ test('map mutations start from the latest cross-tab state', async () => {
   assert.equal(storedMap.nodes.find((node) => node.id === 2).name, 'Beta');
 });
 
+test('status refreshes clear offline tracking without observing stale online locations', async () => {
+  const systems = new Map([
+    [1, { id: 1, name: 'Alpha', adjacent: [] }],
+    [3, { id: 3, name: 'Gamma', adjacent: [] }]
+  ]);
+  let storedMap = {
+    ...emptyMapState(),
+    nodes: [{ id: 1, name: 'Alpha', alias: '', source: 'tracked', createdAt: null, updatedAt: null }],
+    lastLocations: { 99: 1 },
+    selectedSystemId: 1,
+    rootId: 1
+  };
+  const view = new MapperView({
+    store: {
+      updateSetting: async (_key, updater) => {
+        storedMap = updater(storedMap);
+        return storedMap;
+      }
+    },
+    graph: { get: (id) => systems.get(Number(id)) || null, regions: new Map() },
+    toast: () => {},
+    confirmAction: () => true,
+    portraitUrl: () => ''
+  });
+  view.map = storedMap;
+  view.render = () => {};
+  view.renderGraph = () => {};
+  view.queueJumpPrompts = () => {};
+
+  await view.observeCharacters([{ id: 99, presence: { online: false }, location: { id: 1 } }], { trackMovements: false });
+  assert.deepEqual(storedMap.lastLocations, {});
+
+  await view.observeCharacters([{ id: 99, presence: { online: true }, location: { id: 1 } }], { trackMovements: false });
+  assert.deepEqual(storedMap.lastLocations, {});
+
+  await view.observeCharacters([{ id: 99, presence: { online: true }, location: { id: 3 } }]);
+  assert.deepEqual(storedMap.nodes.map((node) => node.id), [1, 3]);
+  assert.equal(storedMap.connections.length, 0);
+  assert.deepEqual(storedMap.lastLocations, { 99: 3 });
+});
+
 test('dropping an unassigned signature on a system creates and labels its connection', async () => {
   const previousAnimationFrame = globalThis.requestAnimationFrame;
   globalThis.requestAnimationFrame = (callback) => callback();

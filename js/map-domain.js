@@ -325,15 +325,29 @@ function nodeDegree(map, systemId) {
   return map.connections.reduce((count, connection) => count + Number(connection.from === systemId || connection.to === systemId), 0);
 }
 
-export function observeCharacterMovements(map, characters, graph, now = () => new Date().toISOString()) {
-  if (!map.autoTrack) return { map, changes: [] };
-  let next = map;
-  let changed = false;
-  const changes = [];
+export function resetOfflineCharacterTracking(map, characters, now = () => new Date().toISOString()) {
   const lastLocations = { ...map.lastLocations };
+  let changed = false;
   (Array.isArray(characters) ? characters : []).forEach((character) => {
-    if (character?.presence?.online !== true || !character.location?.id) return;
+    if (character?.presence?.online === true) return;
     const characterId = String(Number(character.id));
+    if (!Object.prototype.hasOwnProperty.call(lastLocations, characterId)) return;
+    delete lastLocations[characterId];
+    changed = true;
+  });
+  return changed ? { ...map, lastLocations, updatedAt: isoNow(now) } : map;
+}
+
+export function observeCharacterMovements(map, characters, graph, now = () => new Date().toISOString()) {
+  let next = resetOfflineCharacterTracking(map, characters, now);
+  if (!map.autoTrack) return { map: next, changes: [] };
+  let changed = next !== map;
+  const changes = [];
+  const lastLocations = { ...next.lastLocations };
+  (Array.isArray(characters) ? characters : []).forEach((character) => {
+    const characterId = String(Number(character.id));
+    if (character?.presence?.online !== true) return;
+    if (!character.location?.id) return;
     const currentId = Number(character.location.id);
     const current = graph?.get(currentId);
     if (!current) return;
