@@ -71,6 +71,7 @@ export function emptyMapState() {
     autoTrack: true,
     connectionStyle: 'pipe',
     layoutSpacing: 100,
+    layoutVerticalSpacing: 100,
     updatedAt: null
   };
 }
@@ -175,6 +176,10 @@ export function normalizeMapState(value, graph) {
     if (Number.isSafeInteger(Number(characterId)) && graph?.get(Number(systemId))) lastLocations[characterId] = Number(systemId);
   });
   const savedLayoutSpacing = typeof value.layoutSpacing === 'number' ? value.layoutSpacing : Number.NaN;
+  const normalizedLayoutSpacing = Number.isFinite(savedLayoutSpacing)
+    ? Math.min(100, Math.max(0, savedLayoutSpacing))
+    : value.layoutDensity === 'compact' ? 0 : 100;
+  const savedVerticalSpacing = typeof value.layoutVerticalSpacing === 'number' ? value.layoutVerticalSpacing : Number.NaN;
   return {
     ...base,
     name: cleanText(value.name, 60) || base.name,
@@ -186,9 +191,10 @@ export function normalizeMapState(value, graph) {
     selectedSystemId,
     autoTrack: value.autoTrack !== false,
     connectionStyle: value.connectionStyle === 'curve' ? 'curve' : 'pipe',
-    layoutSpacing: Number.isFinite(savedLayoutSpacing)
-      ? Math.min(100, Math.max(0, savedLayoutSpacing))
-      : value.layoutDensity === 'compact' ? 0 : 100,
+    layoutSpacing: normalizedLayoutSpacing,
+    layoutVerticalSpacing: Number.isFinite(savedVerticalSpacing)
+      ? Math.min(100, Math.max(0, savedVerticalSpacing))
+      : normalizedLayoutSpacing,
     updatedAt: value.updatedAt || null
   };
 }
@@ -404,20 +410,26 @@ export function observeCharacterMovements(map, characters, graph, now = () => ne
       } else if (previous) {
         let result = addMapSystem(next, previous, { source: 'tracked' }, now);
         next = result.map;
-        result = addMapSystem(next, current, { source: 'tracked', connectFrom: previousId }, now);
-        next = result.map;
         const mappedConnectionId = connectionId(previousId, currentId);
-        if (result.added || result.connected) {
-          changed = true;
-          changes.push({ type: 'connection', from: previousId, to: currentId, characterId: Number(character.id) });
+        const directConnection = next.connections.some((connection) => connection.id === mappedConnectionId);
+        const connectedThroughMap = connectedMapSystemIds(next.nodes, next.connections, previousId).has(currentId);
+        if (!connectedThroughMap) {
+          result = addMapSystem(next, current, { source: 'tracked', connectFrom: previousId }, now);
+          next = result.map;
+          if (result.added || result.connected) {
+            changed = true;
+            changes.push({ type: 'connection', from: previousId, to: currentId, characterId: Number(character.id) });
+          }
         }
-        changes.push({
-          type: 'wormhole-jump',
-          from: previousId,
-          to: currentId,
-          connectionId: mappedConnectionId,
-          characterId: Number(character.id)
-        });
+        if (directConnection || !connectedThroughMap) {
+          changes.push({
+            type: 'wormhole-jump',
+            from: previousId,
+            to: currentId,
+            connectionId: mappedConnectionId,
+            characterId: Number(character.id)
+          });
+        }
         if (movedFromRoot) {
           next = { ...next, rootId: currentId, selectedSystemId: currentId };
           changed = true;

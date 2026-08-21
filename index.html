@@ -138,31 +138,34 @@
               <h2>Start a chain</h2>
               <p>Connect an online pilot and let Splash follow the first non-gate jump.</p>
             </div>
-            <div class="map-connection-style" role="group" aria-label="Connection style">
-              <button type="button" data-map-connection-style="pipe" aria-pressed="true" aria-label="Pipe connections" title="Pipe connections">|</button>
-              <button type="button" data-map-connection-style="curve" aria-pressed="false" aria-label="Curved connections" title="Curved connections">∿</button>
-            </div>
-            <label class="map-layout-spacing" title="Adjust map spacing">
-              <span>Compact</span>
-              <input id="map-layout-spacing" type="range" min="0" max="100" step="1" value="100" aria-label="Map spacing" aria-valuetext="100% expanded">
-              <span>Expanded</span>
-            </label>
             <label class="map-auto-track map-auto-track-floating" title="Add a connection when a tracked pilot moves between systems without using a stargate">
               <input id="map-auto-track" type="checkbox" checked>
               <span class="toggle-slider" aria-hidden="true"></span>
               <span><strong>Auto-map</strong><small>non-gate jumps</small></span>
             </label>
-            <div class="map-zoom-controls" aria-label="Map view controls">
-              <button id="map-fit" type="button" aria-label="Fit chain" title="Fit chain"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
-              <button id="map-zoom-in" type="button" aria-label="Zoom in">＋</button>
-              <button id="map-zoom-out" type="button" aria-label="Zoom out">−</button>
-            </div>
-            <div class="map-legend" aria-label="Connection legend">
-              <span><i class="is-stable"></i> stable</span>
-              <span><i class="is-under-4h"></i> &lt;4h</span>
-              <span><i class="is-under-1h"></i> &lt;1h</span>
-              <span><i class="is-expired"></i> expired</span>
-              <span><i class="is-critical"></i> critical mass</span>
+            <div class="map-bottom-toolbar">
+              <div class="map-legend" aria-label="Connection legend">
+                <span><i class="is-stable"></i> stable</span>
+                <span><i class="is-under-4h"></i> &lt;4h</span>
+                <span><i class="is-under-1h"></i> &lt;1h</span>
+                <span><i class="is-expired"></i> expired</span>
+                <span><i class="is-critical"></i> critical mass</span>
+              </div>
+              <div class="map-presentation-controls" aria-label="Map presentation controls">
+                <div class="map-connection-style" role="group" aria-label="Connection style">
+                  <button type="button" data-map-connection-style="pipe" aria-pressed="true" aria-label="Pipe connections" title="Pipe connections">|</button>
+                  <button type="button" data-map-connection-style="curve" aria-pressed="false" aria-label="Curved connections" title="Curved connections">∿</button>
+                </div>
+                <div class="map-layout-spacing" role="group" aria-label="Map spacing">
+                  <label title="Horizontal spacing"><span aria-hidden="true">↔</span><input id="map-layout-spacing" type="range" min="0" max="100" step="1" value="100" aria-label="Horizontal map spacing" aria-valuetext="Maximum horizontal spacing"></label>
+                  <label title="Vertical spacing"><span aria-hidden="true">↕</span><input id="map-layout-vertical-spacing" type="range" min="0" max="100" step="1" value="100" aria-label="Vertical map spacing" aria-valuetext="Maximum vertical spacing"></label>
+                </div>
+              </div>
+              <div class="map-zoom-controls" aria-label="Map view controls">
+                <button id="map-fit" type="button" aria-label="Fit chain" title="Fit chain"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
+                <button id="map-zoom-in" type="button" aria-label="Zoom in">＋</button>
+                <button id="map-zoom-out" type="button" aria-label="Zoom out">−</button>
+              </div>
             </div>
           </div>
         </section>

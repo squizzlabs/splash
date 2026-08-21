@@ -13,9 +13,13 @@ test('the jump prompt keeps Map connection enabled for custom signatures', () =>
   assert.match(html, /data-map-connection-style="pipe"[^>]*>\|<\/button>/);
   assert.match(html, /data-map-connection-style="curve"[^>]*>∿<\/button>/);
   assert.match(html, /id="map-layout-spacing"[^>]*type="range"[^>]*min="0"[^>]*max="100"/);
+  assert.match(html, /id="map-layout-vertical-spacing"[^>]*type="range"[^>]*min="0"[^>]*max="100"/);
+  const toolbar = html.match(/<div class="map-bottom-toolbar">([\s\S]*?)<\/div>\s*<\/div>\s*<\/section>/)?.[1] || '';
+  assert.ok(toolbar.indexOf('class="map-legend"') < toolbar.indexOf('class="map-presentation-controls"'));
+  assert.ok(toolbar.indexOf('class="map-presentation-controls"') < toolbar.indexOf('class="map-zoom-controls"'));
 });
 
-test('map spacing slider blends continuously between compact and expanded layouts', () => {
+test('map spacing sliders independently blend horizontal and vertical layouts', () => {
   const nodes = [1, 2, 3, 4, 5].map((id) => ({ id }));
   const connections = [
     { from: 1, to: 2 },
@@ -26,9 +30,15 @@ test('map spacing slider blends continuously between compact and expanded layout
   const compact = computeMapLayout(nodes, connections, 1, 0);
   const middle = computeMapLayout(nodes, connections, 1, 50);
   const expanded = computeMapLayout(nodes, connections, 1, 100);
+  const wideAndTight = computeMapLayout(nodes, connections, 1, 100, 0);
+  const compactAndTall = computeMapLayout(nodes, connections, 1, 0, 100);
   nodes.forEach(({ id }) => {
     assert.equal(middle.get(id).x, (compact.get(id).x + expanded.get(id).x) / 2);
     assert.equal(middle.get(id).y, (compact.get(id).y + expanded.get(id).y) / 2);
+    assert.equal(wideAndTight.get(id).x, expanded.get(id).x);
+    assert.equal(wideAndTight.get(id).y, compact.get(id).y);
+    assert.equal(compactAndTall.get(id).x, compact.get(id).x);
+    assert.equal(compactAndTall.get(id).y, expanded.get(id).y);
   });
   assert.ok(Math.max(...[...compact.values()].map(({ x }) => x)) < Math.max(...[...expanded.values()].map(({ x }) => x)));
   [compact, middle, expanded].forEach((positions) => {

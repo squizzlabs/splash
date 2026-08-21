@@ -100,19 +100,20 @@ export function normalizeMapLayoutSpacing(value) {
   return Number.isFinite(spacing) ? Math.min(100, Math.max(0, spacing)) : 100;
 }
 
-export function computeMapLayout(nodes, connections, rootId, layoutSpacing = 100) {
-  const blend = normalizeMapLayoutSpacing(layoutSpacing) / 100;
+export function computeMapLayout(nodes, connections, rootId, layoutSpacing = 100, verticalSpacing = layoutSpacing) {
+  const horizontalBlend = normalizeMapLayoutSpacing(layoutSpacing) / 100;
+  const verticalBlend = normalizeMapLayoutSpacing(verticalSpacing) / 100;
   const compact = computeChainLayout(nodes, connections, rootId, MAP_LAYOUT_SPACING.compact);
-  if (blend === 0) return compact;
+  if (horizontalBlend === 0 && verticalBlend === 0) return compact;
   const expanded = computeChainLayout(nodes, connections, rootId, MAP_LAYOUT_SPACING.expanded);
-  if (blend === 1) return expanded;
+  if (horizontalBlend === 1 && verticalBlend === 1) return expanded;
   const positions = new Map();
   expanded.forEach((expandedPosition, id) => {
     const compactPosition = compact.get(id) || expandedPosition;
     positions.set(id, {
       ...expandedPosition,
-      x: compactPosition.x + (expandedPosition.x - compactPosition.x) * blend,
-      y: compactPosition.y + (expandedPosition.y - compactPosition.y) * blend
+      x: compactPosition.x + (expandedPosition.x - compactPosition.x) * horizontalBlend,
+      y: compactPosition.y + (expandedPosition.y - compactPosition.y) * verticalBlend
     });
   });
   return positions;
@@ -272,7 +273,8 @@ export class MapperView {
       this.visibleNodes,
       this.visibleConnections,
       this.layoutRootId,
-      this.map.layoutSpacing
+      this.map.layoutSpacing,
+      this.map.layoutVerticalSpacing
     );
     this.renderToolbar();
     this.renderGraph();
@@ -298,14 +300,18 @@ export class MapperView {
     document.querySelectorAll('[data-map-connection-style]').forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.mapConnectionStyle === this.map.connectionStyle));
     });
-    const layoutSpacing = document.getElementById('map-layout-spacing');
-    if (layoutSpacing) {
-      layoutSpacing.value = String(normalizeMapLayoutSpacing(this.map.layoutSpacing));
-      const valueText = layoutSpacing.value === '0'
-        ? 'Compact'
-        : layoutSpacing.value === '100' ? 'Expanded' : `${layoutSpacing.value}% expanded`;
-      layoutSpacing.setAttribute('aria-valuetext', valueText);
-    }
+    [
+      ['map-layout-spacing', this.map.layoutSpacing, 'horizontal'],
+      ['map-layout-vertical-spacing', this.map.layoutVerticalSpacing, 'vertical']
+    ].forEach(([elementId, spacing, axis]) => {
+      const input = document.getElementById(elementId);
+      if (!input) return;
+      input.value = String(normalizeMapLayoutSpacing(spacing));
+      const valueText = input.value === '0'
+        ? `Minimum ${axis} spacing`
+        : input.value === '100' ? `Maximum ${axis} spacing` : `${input.value}% ${axis} spacing`;
+      input.setAttribute('aria-valuetext', valueText);
+    });
   }
 
   renderGraph() {
@@ -878,18 +884,23 @@ export class MapperView {
         this.mutate((map) => ({ ...map, connectionStyle })).catch((error) => this.toast(error.message, 'error'));
       });
     });
-    const layoutSpacing = document.getElementById('map-layout-spacing');
-    layoutSpacing?.addEventListener('input', (event) => {
-      const value = normalizeMapLayoutSpacing(event.target.value);
-      const preferredScale = this.viewport.scale;
-      this.map = { ...this.map, layoutSpacing: value };
-      this.render();
-      this.fit({ preferredScale, persist: false });
-    });
-    layoutSpacing?.addEventListener('change', (event) => {
-      const value = normalizeMapLayoutSpacing(event.target.value);
-      this.mutate((map) => ({ ...map, layoutSpacing: value }), { fit: true })
-        .catch((error) => this.toast(error.message, 'error'));
+    [
+      ['map-layout-spacing', 'layoutSpacing'],
+      ['map-layout-vertical-spacing', 'layoutVerticalSpacing']
+    ].forEach(([elementId, field]) => {
+      const input = document.getElementById(elementId);
+      input?.addEventListener('input', (event) => {
+        const value = normalizeMapLayoutSpacing(event.target.value);
+        const preferredScale = this.viewport.scale;
+        this.map = { ...this.map, [field]: value };
+        this.render();
+        this.fit({ preferredScale, persist: false });
+      });
+      input?.addEventListener('change', (event) => {
+        const value = normalizeMapLayoutSpacing(event.target.value);
+        this.mutate((map) => ({ ...map, [field]: value }), { fit: true })
+          .catch((error) => this.toast(error.message, 'error'));
+      });
     });
     document.getElementById('map-jump-form')?.addEventListener('submit', (event) => {
       event.preventDefault();

@@ -41,9 +41,13 @@ const now = () => '2026-08-20T12:00:00.000Z';
 test('map connection style defaults to pipe and preserves the curve option', () => {
   assert.equal(emptyMapState().connectionStyle, 'pipe');
   assert.equal(emptyMapState().layoutSpacing, 100);
+  assert.equal(emptyMapState().layoutVerticalSpacing, 100);
   assert.equal(normalizeMapState({ connectionStyle: 'curve' }, graph).connectionStyle, 'curve');
   assert.equal(normalizeMapState({ layoutSpacing: 35 }, graph).layoutSpacing, 35);
+  assert.equal(normalizeMapState({ layoutSpacing: 35 }, graph).layoutVerticalSpacing, 35);
+  assert.equal(normalizeMapState({ layoutSpacing: 35, layoutVerticalSpacing: 60 }, graph).layoutVerticalSpacing, 60);
   assert.equal(normalizeMapState({ layoutSpacing: -20 }, graph).layoutSpacing, 0);
+  assert.equal(normalizeMapState({ layoutVerticalSpacing: -20 }, graph).layoutVerticalSpacing, 0);
   assert.equal(normalizeMapState({ layoutSpacing: 120 }, graph).layoutSpacing, 100);
   assert.equal(normalizeMapState({ layoutDensity: 'compact' }, graph).layoutSpacing, 0);
   assert.equal(normalizeMapState({ connectionStyle: 'unknown' }, graph).connectionStyle, 'pipe');
@@ -105,6 +109,19 @@ test('returning through an existing wormhole still emits a jump for the unmapped
     connectionId: '1:3',
     characterId: 99
   }]);
+});
+
+test('a missed intermediate system does not create a shortcut across the mapped chain', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  map = addMapSystem(map, systems.get(4), { connectFrom: 3 }, now).map;
+  map = { ...map, lastLocations: { 99: 1 } };
+
+  const result = observeCharacterMovements(map, [{ id: 99, presence: { online: true }, location: { id: 4 } }], graph, now);
+
+  assert.deepEqual(result.map.connections.map((connection) => connection.id), ['1:3', '3:4']);
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(result.map.lastLocations, { 99: 4 });
 });
 
 test('offline characters do not add to the chain or create a tracking cursor', () => {
