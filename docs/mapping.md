@@ -18,6 +18,8 @@ Splash includes a browser-local wormhole chain mapper alongside its route planne
 
 The renderer uses native SVG rather than a graph library. Layout is a live-rooted tree: the focused pilot's current system stays at the top, each jump moves one row downward, and every parent's descendants occupy one contiguous horizontal subtree. A single subdued toolbar runs along the bottom of the canvas: the connection legend comes first, followed by the `|` and `∿` connection-style toggle and independent horizontal and vertical spacing sliders, with fit and zoom controls aligned at the far right. The sliders continuously blend between compact and roomy layouts without shrinking or overlapping system cards, while the horizontal control also uses contour packing to tuck shallow branches into unused space. All three presentation choices are remembered locally. Connection life, mass, and size are encoded on the line so degraded links can be read without opening the inspector.
 
+J-space cards and system details use the heading format `J123456 (C3) Magnetar`, omitting the effect when none is present. The following line lists every static as destination and signature type, such as `HS (B274), C3 (O477)`. Known-space destinations appear first (`HS`, `LS`, `NS`), followed by `C1` through `C6` and special destinations; codes within a destination sort alphabetically. This metadata is loaded from [`data/wormhole-systems.json`](../data/wormhole-systems.json), with long static lists split across two compact card lines.
+
 ## Auto-mapping safeguards
 
 ESI provides a character's current solar system but does not identify how the character moved. Splash compares consecutive locations against the bundled stargate adjacency graph:

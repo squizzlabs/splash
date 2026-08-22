@@ -313,9 +313,11 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
 .map-system-node:focus-visible .map-node-body, .map-system-node.is-selected .map-node-body { stroke: #d8ff5f; stroke-width: 2px; filter: drop-shadow(0 0 8px rgb(216 255 95 / 25%)); }
 .map-system-node.is-signature-drop-target .map-node-body { fill: #1d2919; stroke: var(--accent); stroke-width: 3px; filter: drop-shadow(0 0 11px rgb(216 255 95 / 50%)); }
 .map-node-name { fill: #f0f4f7; font-size: 14px; font-weight: 800; letter-spacing: -.015em; }
+.map-node-name.is-wormhole { font-size: 11px; letter-spacing: -.025em; }
 .map-node-alias { fill: #b8d7f5; font-size: 10px; font-weight: 680; }
 .map-node-meta { fill: #b8d7f5; font-size: 9px; font-weight: 650; }
 .map-node-signatures { fill: #b8c5d1; font-size: 9px; font-weight: 750; }
+.map-node-wormhole { fill: #b8c5d1; font-size: 8px; font-weight: 750; }
 .map-pilot-image { clip-path: circle(9px at center); filter: drop-shadow(0 0 2px #000); }
 .map-empty-state { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding: 30px; text-align: center; pointer-events: none; }
 .map-empty-state h2 { margin: 15px 0 6px; color: #f0f4f7; font-size: 21px; letter-spacing: -.025em; }

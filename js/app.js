@@ -717,16 +717,46 @@ async function submitNavigationDelivery(character, delivery, clearOtherWaypoints
   return delivery.action?.key || null;
 }
 
+function wormholeSystemSummary(system) {
+  if (!system?.wormhole) return null;
+  const effect = String(system.wormhole.effect || '').trim();
+  const statics = (Array.isArray(system.wormhole.statics) ? system.wormhole.statics : []).map((staticExit) => {
+    const pair = Array.isArray(staticExit);
+    const object = staticExit && typeof staticExit === 'object' && !pair;
+    const code = String(pair ? staticExit[0] : object ? staticExit.code : staticExit || '').trim().toUpperCase();
+    const destination = String(pair ? staticExit[1] : object ? staticExit.destination : '').trim();
+    return destination ? `${destination} (${code})` : code;
+  }).filter(Boolean).join(', ');
+  const classLabel = `C${system.wormhole.class}`;
+  return {
+    classLabel,
+    effect,
+    statics,
+    heading: [system.name, `(${classLabel})`, effect].filter(Boolean).join(' ')
+  };
+}
+
+function systemAutocompleteDetail(system) {
+  const wormhole = wormholeSystemSummary(system);
+  return wormhole
+    ? [system.id, wormhole.classLabel, wormhole.effect, wormhole.statics].filter(Boolean).join(' · ')
+    : `${system.id} · security ${system.security.toFixed(1)}`;
+}
+
 function jumpMarkerMarkup(routeSystem) {
   const system = state.graph.get(routeSystem.id);
+  const wormholeSystem = wormholeSystemSummary(system);
   const security = Number(system?.security);
-  const securityLabel = Number.isFinite(security) ? security.toFixed(1) : 'unknown security';
+  const securityLabel = wormholeSystem?.classLabel || (Number.isFinite(security) ? security.toFixed(1) : 'unknown security');
   const stopLabel = routeSystem.isDockingStop
     ? ` · ${routeSystem.dockingStop?.kind || 'docking'} destination`
     : routeSystem.wormhole
     ? ` · wormhole ${routeSystem.wormhole.signatureId} → ${routeSystem.wormhole.to.name}`
     : routeSystem.isStop ? ' · route stop' : '';
-  const title = `${system?.name || routeSystem.name || `System ${routeSystem.id}`} · ${securityLabel}${stopLabel}`;
+  const wormholeLabel = wormholeSystem
+    ? ` · ${[wormholeSystem.effect, `statics ${wormholeSystem.statics}`].filter(Boolean).join(' · ')}`
+    : '';
+  const title = `${wormholeSystem?.heading || system?.name || routeSystem.name || `System ${routeSystem.id}`} · ${securityLabel}${wormholeLabel}${stopLabel}`;
   const markerClass = routeSystem.isDockingStop ? 'is-docking' : routeSystem.isStop ? 'is-stop' : 'is-transit';
   const color = systemSecurityColor(security);
   return `<span class="jump-marker ${markerClass}" style="--jump-color:${color}" title="${escapeHtml(title)}" aria-hidden="true"></span>`;
@@ -762,17 +792,21 @@ function wormholeInstructionMarkup(wormhole, assignment) {
 
 function routeSystemDetailMarkup(routeSystem) {
   const system = state.graph.get(routeSystem.id);
+  const wormholeSystem = wormholeSystemSummary(system);
   const security = Number(system?.security);
-  const securityLabel = Number.isFinite(security) ? security.toFixed(1) : '—';
+  const securityLabel = wormholeSystem?.classLabel || (Number.isFinite(security) ? security.toFixed(1) : '—');
   const region = state.graph.regions.get(Number(system?.regionId));
+  const locationDetails = wormholeSystem
+    ? [wormholeSystem.effect, wormholeSystem.statics].filter(Boolean).join(' · ')
+    : region?.name || 'Unknown region';
   const destinationName = routeSystem.isDockingStop && routeSystem.dockingStop?.name
     ? routeSystem.dockingStop.name
-    : system?.name || routeSystem.name || `System ${routeSystem.id}`;
+    : wormholeSystem?.heading || system?.name || routeSystem.name || `System ${routeSystem.id}`;
   return `<div class="pilot-route-detail-row">
     ${jumpMarkerMarkup(routeSystem)}
     <strong>${escapeHtml(destinationName)}</strong>
     <span class="pilot-route-detail-security">${securityLabel}</span>
-    <span>${escapeHtml(region?.name || 'Unknown region')}</span>
+    <span>${escapeHtml(locationDetails)}</span>
   </div>`;
 }
 
@@ -1092,12 +1126,12 @@ function showSystemAutocomplete(input) {
   const areaInput = input.hasAttribute('data-area-autocomplete');
   const stopInput = input.hasAttribute('data-stop-autocomplete');
   menu.innerHTML = matches.map((item, index) => `<button id="system-option-${index}" type="button" role="option" data-index="${index}" aria-selected="${index === 0 ? 'true' : 'false'}" class="${index === 0 ? 'is-active' : ''}">
-    <strong>${escapeHtml(item.name)}${item.marketHub ? ' <em class="market-hub-label">[MARKET HUB]</em>' : ''}</strong>
+    <strong>${escapeHtml(wormholeSystemSummary(item)?.heading || item.name)}${item.marketHub ? ' <em class="market-hub-label">[MARKET HUB]</em>' : ''}</strong>
     <span>${areaInput
       ? `${escapeHtml(item.type)} · ${item.id}`
       : stopInput && item.kind === 'station'
         ? `station · ${escapeHtml(item.systemName)} · ${item.id}`
-        : `${item.id} · security ${item.security.toFixed(1)}`}</span>
+        : escapeHtml(systemAutocompleteDetail(item))}</span>
   </button>`).join('');
   menu.hidden = false;
   input.setAttribute('aria-expanded', 'true');

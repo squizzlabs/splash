@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { emptyMapState } from '../js/map-domain.js';
-import { computeMapLayout, curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, normalizeMapLayoutSpacing, MapperView } from '../js/map-view.js';
+import { computeMapLayout, curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, normalizeMapLayoutSpacing, MapperView, wormholeSystemDisplay } from '../js/map-view.js';
 
 test('the jump prompt keeps Map connection enabled for custom signatures', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -56,6 +56,28 @@ test('map spacing sliders independently blend horizontal and vertical layouts', 
   });
   assert.equal(normalizeMapLayoutSpacing(-1), 0);
   assert.equal(normalizeMapLayoutSpacing(101), 100);
+});
+
+test('wormhole system details format class, type, and ordered static destinations', () => {
+  assert.deepEqual(wormholeSystemDisplay({
+    name: 'J055520',
+    wormhole: { class: 14, effect: 'Red Giant', statics: [
+      { code: 'D382', destination: 'C2' },
+      { code: 'N110', destination: 'HS' },
+      { code: 'Z647', destination: 'C1' }
+    ] }
+  }), {
+    classLabel: 'C14',
+    effect: 'Red Giant',
+    statics: [
+      { code: 'N110', destination: 'HS' },
+      { code: 'Z647', destination: 'C1' },
+      { code: 'D382', destination: 'C2' }
+    ],
+    staticLabels: ['HS (N110)', 'C1 (Z647)', 'C2 (D382)'],
+    heading: 'J055520 (C14) Red Giant'
+  });
+  assert.equal(wormholeSystemDisplay({ name: 'J123456', wormhole: { class: 1, effect: '', statics: [{ code: 'Z060', destination: 'NS' }] } }).heading, 'J123456 (C1)');
 });
 
 test('map connections use right-angle paths', () => {
@@ -121,7 +143,7 @@ test('the inspector folds connection settings into the matching signature editor
   globalThis.document = { getElementById: (id) => id === 'map-inspector-content' ? container : null };
   try {
     const systems = new Map([
-      [1, { id: 1, name: 'Alpha', regionId: 10, security: -1 }],
+      [1, { id: 1, name: 'Alpha', regionId: 10, security: -1, wormhole: { class: 1, effect: 'Pulsar', statics: [{ code: 'Z647', destination: 'C1' }, { code: 'N110', destination: 'HS' }] } }],
       [2, { id: 2, name: 'Beta', regionId: 10, security: -1 }]
     ]);
     const view = new MapperView({
@@ -145,8 +167,15 @@ test('the inspector folds connection settings into the matching signature editor
     assert.match(container.innerHTML, />Signatures /);
     assert.doesNotMatch(container.innerHTML, />Connections /);
     assert.match(container.innerHTML, /Beta · K162/);
+    assert.match(container.innerHTML, /placeholder="Alpha \(C1\) Pulsar"/);
+    assert.match(container.innerHTML, /Statics HS \(N110\), C1 \(Z647\)/);
     assert.match(container.innerHTML, /data-map-edit-signature="ABC-123"/);
     assert.doesNotMatch(container.innerHTML, /data-map-signature-edit-form/);
+
+    systems.get(1).wormhole.effect = '';
+    view.renderInspector();
+    assert.match(container.innerHTML, /placeholder="Alpha \(C1\)"/);
+    assert.match(container.innerHTML, /Statics HS \(N110\), C1 \(Z647\)/);
 
     view.editingSignature = { systemId: 1, id: 'ABC-123' };
     view.renderInspector();

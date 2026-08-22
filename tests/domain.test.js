@@ -523,11 +523,26 @@ test('coverage visits every target using shortest available legs', () => {
 
 test('bundled SDE graph resolves and routes between trade hubs', () => {
   const payload = JSON.parse(fs.readFileSync(new URL('../data/universe.json', import.meta.url), 'utf8'));
-  const graph = new UniverseGraph(payload);
+  const wormholePayload = JSON.parse(fs.readFileSync(new URL('../data/wormhole-systems.json', import.meta.url), 'utf8'));
+  const graph = new UniverseGraph(payload, wormholePayload);
   const jita = graph.resolve('Jita');
   const amarr = graph.resolve('Amarr');
   assert.ok(graph.systems.size > 8_000);
   assert.ok(graph.stations.size > 5_000);
+  assert.equal(graph.wormholeSystems.size, 2_602);
+  assert.deepEqual(graph.get(31_000_007).wormhole, { class: 1, effect: '', statics: [{ code: 'Z060', destination: 'NS' }] });
+  assert.deepEqual(graph.get(31_000_001).wormhole, {
+    class: 14,
+    effect: 'Red Giant',
+    statics: [
+      { code: 'Z647', destination: 'C1' },
+      { code: 'D382', destination: 'C2' },
+      { code: 'O477', destination: 'C3' },
+      { code: 'Y683', destination: 'C4' },
+      { code: 'N062', destination: 'C5' },
+      { code: 'R474', destination: 'C6' }
+    ]
+  });
   assert.equal(jita.id, 30000142);
   assert.equal(amarr.id, 30002187);
   const jitaStation = graph.resolveStop('Jita IV - Moon 4 - Caldari Navy Assembly Plant');

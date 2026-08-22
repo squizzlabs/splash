@@ -72,6 +72,36 @@ function systemClass(system) {
   return 'Null security';
 }
 
+export function wormholeSystemDisplay(system) {
+  const details = system?.wormhole;
+  if (!details || !Number.isSafeInteger(Number(details.class))) return null;
+  const destinationOrder = ['HS', 'LS', 'NS', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C13', 'Thera', 'Sentinel', 'Barbican', 'Vidette', 'Conflux', 'Redoubt', 'Pochven'];
+  const destinationRanks = new Map(destinationOrder.map((destination, index) => [destination, index]));
+  const statics = (Array.isArray(details.statics) ? details.statics : []).map((staticExit) => {
+    const pair = Array.isArray(staticExit);
+    const object = staticExit && typeof staticExit === 'object' && !pair;
+    return {
+      code: String(pair ? staticExit[0] : object ? staticExit.code : staticExit || '').trim().toUpperCase(),
+      destination: String(pair ? staticExit[1] : object ? staticExit.destination : '').trim()
+    };
+  }).filter((staticExit) => staticExit.code).sort((left, right) => {
+    const leftRank = destinationRanks.get(left.destination) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = destinationRanks.get(right.destination) ?? Number.MAX_SAFE_INTEGER;
+    return leftRank - rightRank || left.destination.localeCompare(right.destination) || left.code.localeCompare(right.code);
+  });
+  const staticLabels = statics.map((staticExit) => staticExit.destination
+    ? `${staticExit.destination} (${staticExit.code})`
+    : staticExit.code);
+  const effect = String(details.effect || '').trim();
+  return {
+    classLabel: `C${details.class}`,
+    effect,
+    statics,
+    staticLabels,
+    heading: [String(system.name || ''), `(C${details.class})`, effect].filter(Boolean).join(' ')
+  };
+}
+
 function signatureGroupOptions(selectedGroup) {
   const groups = SIGNATURE_GROUPS.includes(selectedGroup) ? SIGNATURE_GROUPS : [selectedGroup, ...SIGNATURE_GROUPS];
   return groups.map((group) => `<option value="${svgEscape(group)}" ${group === selectedGroup ? 'selected' : ''}>${svgEscape(group === 'Cosmic Signature' ? 'Signature' : group)}</option>`).join('');
@@ -358,20 +388,34 @@ export class MapperView {
       const system = this.graph.get(node.id);
       if (!position || !system) return '';
       const region = this.graph.regions.get(system.regionId)?.name || 'Unknown region';
+      const wormhole = wormholeSystemDisplay(system);
       const pilots = pilotGroups.get(node.id) || [];
       const signatures = this.map.signatures[node.id]?.length || 0;
       const selected = this.map.selectedSystemId === node.id;
+      const metadata = `${systemClass(system)} · ${region}`;
+      const wormholeStaticLines = wormhole
+        ? (wormhole.staticLabels.length > 3
+            ? [wormhole.staticLabels.slice(0, 3), wormhole.staticLabels.slice(3)]
+            : [wormhole.staticLabels])
+          .filter((line) => line.length)
+          .map((line) => line.join(', '))
+        : [];
+      const fitWormholeHeading = wormhole?.heading.length > 24
+        ? ` textLength="${NODE_WIDTH - 30}" lengthAdjust="spacingAndGlyphs"`
+        : '';
+      const accessibleName = wormhole ? `${wormhole.heading}, statics ${wormhole.staticLabels.join(', ')}` : system.name;
       const portraits = pilots.slice(0, 4).map((character, index) =>
         `<image class="map-pilot-image" href="${this.portraitUrl(character.id, 64)}" x="${NODE_WIDTH - 23 - index * 18}" y="46" width="20" height="20"><title>${svgEscape(character.name)}</title></image>`
       ).join('');
-      return `<g class="map-system-node ${selected ? 'is-selected' : ''}" transform="translate(${position.x} ${position.y})" data-map-system="${node.id}" role="button" tabindex="0" aria-label="${svgEscape(system.name)}">
+      return `<g class="map-system-node ${selected ? 'is-selected' : ''}" transform="translate(${position.x} ${position.y})" data-map-system="${node.id}" role="button" tabindex="0" aria-label="${svgEscape(accessibleName)}">
+        ${wormhole ? `<title>${svgEscape(`${wormhole.heading} · Statics ${wormhole.staticLabels.join(', ')}`)}</title>` : ''}
         <rect class="map-node-shadow" x="2" y="3" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="5"></rect>
         <rect class="map-node-body" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="5"></rect>
         <rect class="map-node-band" width="5" height="${NODE_HEIGHT}" rx="3" fill="${systemBand(system)}"></rect>
-        <text class="map-node-name" x="15" y="23">${svgEscape(node.alias || system.name)}</text>
-        ${node.alias ? `<text class="map-node-alias" x="15" y="39">${svgEscape(system.name)}</text>` : ''}
-        <text class="map-node-meta" x="15" y="${node.alias ? 54 : 42}">${svgEscape(systemClass(system))} · ${svgEscape(region)}</text>
-        ${signatures ? `<text class="map-node-signatures" x="15" y="63">${signatures} sig${signatures === 1 ? '' : 's'}</text>` : ''}
+        <text class="map-node-name ${wormhole && !node.alias ? 'is-wormhole' : ''}" x="15" y="23"${!node.alias ? fitWormholeHeading : ''}>${svgEscape(node.alias || wormhole?.heading || system.name)}</text>
+        ${node.alias ? `<text class="map-node-alias" x="15" y="39"${fitWormholeHeading}>${svgEscape(wormhole?.heading || system.name)}</text>` : ''}
+        ${wormhole ? '' : `<text class="map-node-meta" x="15" y="${node.alias ? 54 : 42}">${svgEscape(metadata)}</text>`}
+        ${wormholeStaticLines.map((line, index) => `<text class="map-node-wormhole" x="15" y="${(node.alias ? 54 : 43) + index * 13}">${svgEscape(line)}</text>`).join('') || (signatures ? `<text class="map-node-signatures" x="15" y="63">${signatures} sig${signatures === 1 ? '' : 's'}</text>` : '')}
         ${portraits}
       </g>`;
     }).join('');
@@ -388,6 +432,7 @@ export class MapperView {
       return;
     }
     const region = this.graph.regions.get(system.regionId)?.name || 'Unknown region';
+    const wormhole = wormholeSystemDisplay(system);
     const connections = this.map.connections.filter((connection) => connection.from === node.id || connection.to === node.id);
     const signatures = this.map.signatures[node.id] || [];
     const localConnectionSignature = (connection) => String(connection.from === node.id ? connection.fromSignature : connection.toSignature).toUpperCase();
@@ -459,9 +504,11 @@ export class MapperView {
         <td class="map-signature-remove"><button type="button" data-map-remove-signature="${svgEscape(signature.id)}" aria-label="Remove ${svgEscape(signature.id)}">×</button></td>
       </tr>${editor}`;
     }).join('') : '<tr><td class="map-signature-empty" colspan="5">No signatures recorded.</td></tr>';
-    const systemFacts = [node.alias ? system.name : null, region, system.security.toFixed(1), systemClass(system), `${ageLabel(node.createdAt)} old`].filter(Boolean);
+    const systemFacts = wormhole
+      ? [node.alias ? wormhole.heading : null, region, `Statics ${wormhole.staticLabels.join(', ')}`, `${ageLabel(node.createdAt)} old`].filter(Boolean)
+      : [node.alias ? system.name : null, region, system.security.toFixed(1), systemClass(system), `${ageLabel(node.createdAt)} old`].filter(Boolean);
     container.innerHTML = `<header class="map-inspector-system" style="--system-band:${systemBand(system)}">
-      <div class="map-inspector-title-row"><div><span class="eyebrow">Selected system</span><input class="map-system-alias-input" data-map-node-field="alias" value="${svgEscape(node.alias)}" placeholder="${svgEscape(system.name)}" maxlength="60" aria-label="System alias"></div><button class="map-system-remove" type="button" data-map-action="remove-system" aria-label="Remove ${svgEscape(system.name)}" title="Remove system">×</button></div>
+      <div class="map-inspector-title-row"><div><span class="eyebrow">Selected system</span><input class="map-system-alias-input" data-map-node-field="alias" value="${svgEscape(node.alias)}" placeholder="${svgEscape(wormhole?.heading || system.name)}" maxlength="60" aria-label="System alias"></div><button class="map-system-remove" type="button" data-map-action="remove-system" aria-label="Remove ${svgEscape(system.name)}" title="Remove system">×</button></div>
       <p class="map-system-facts">${systemFacts.map((fact) => `<span>${svgEscape(fact)}</span>`).join('')}</p>
     </header>
     <section class="map-inspector-section"><div class="map-section-heading"><h2>Signatures <span class="map-section-count">${signatures.length}</span></h2><button class="button button-primary map-paste-button" type="button" data-map-action="paste-signatures"><svg class="map-paste-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5h-1A1.5 1.5 0 0 0 3 5v7.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V5a1.5 1.5 0 0 0-1.5-1.5h-1"/><rect x="5.5" y="2" width="5" height="3" rx="1"/></svg><span>Paste scan</span></button></div>

@@ -69,7 +69,7 @@ function geometricDistance(a, b) {
 }
 
 export class UniverseGraph {
-  constructor(payload) {
+  constructor(payload, wormholePayload = null) {
     if (!payload || payload.schemaVersion !== 1 || !Array.isArray(payload.systems)) {
       throw new Error('The bundled universe graph is invalid.');
     }
@@ -82,6 +82,7 @@ export class UniverseGraph {
     this.regions = new Map();
     this.constellations = new Map();
     this.stations = new Map();
+    this.wormholeSystems = new Map();
     this.regionNames = new Map();
     this.constellationNames = new Map();
     this.stationNames = new Map();
@@ -111,6 +112,32 @@ export class UniverseGraph {
       this.systems.set(system.id, system);
       this.names.set(system.name.toLocaleLowerCase(), system.id);
     });
+    if (wormholePayload != null) {
+      if (wormholePayload.schemaVersion !== 1 || !Array.isArray(wormholePayload.systems)) {
+        throw new Error('The bundled wormhole system data is invalid.');
+      }
+      wormholePayload.systems.forEach((row) => {
+        const [idValue, classValue, effectValue, staticsValue] = row;
+        const id = Number(idValue);
+        const wormholeClass = Number(classValue);
+        const system = this.get(id);
+        const statics = Array.isArray(staticsValue) ? staticsValue.map((value) => ({
+          code: String(value?.[0] || '').trim().toUpperCase(),
+          destination: String(value?.[1] || '').trim()
+        })) : [];
+        if (!system || !Number.isSafeInteger(wormholeClass) || wormholeClass < 1 || !statics.length || this.wormholeSystems.has(id)
+          || statics.some((staticExit) => !staticExit.code || !staticExit.destination)) {
+          throw new Error('The bundled wormhole system data is invalid.');
+        }
+        const wormhole = {
+          class: wormholeClass,
+          effect: String(effectValue || '').trim(),
+          statics
+        };
+        system.wormhole = wormhole;
+        this.wormholeSystems.set(id, wormhole);
+      });
+    }
     (payload.stations || []).forEach(([id, name, systemId]) => {
       const system = this.get(systemId);
       if (!system) return;
@@ -127,10 +154,11 @@ export class UniverseGraph {
     });
   }
 
-  static async load(url = './data/universe.json') {
-    const response = await fetch(url);
+  static async load(url = './data/universe.json', wormholeUrl = './data/wormhole-systems.json') {
+    const [response, wormholeResponse] = await Promise.all([fetch(url), fetch(wormholeUrl)]);
     if (!response.ok) throw new Error(`Universe graph could not be loaded (${response.status}).`);
-    return new UniverseGraph(await response.json());
+    if (!wormholeResponse.ok) throw new Error(`Wormhole system data could not be loaded (${wormholeResponse.status}).`);
+    return new UniverseGraph(await response.json(), await wormholeResponse.json());
   }
 
   get(id) {

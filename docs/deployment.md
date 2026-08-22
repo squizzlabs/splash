@@ -69,6 +69,12 @@ The app has no cross-device synchronization. Import and export move route plans 
 - Regions
 - Constellations
 - NPC stations
+
+[`data/wormhole-systems.json`](../data/wormhole-systems.json) separately provides J-space class, environmental effect/type, and destination-labeled static wormhole codes. Regenerate it from a `wh_effects.csv` export; the importer reads the adjacent `sig2class.csv` destination mapping automatically:
+
+```bash
+node scripts/import-wormhole-systems.mjs --input /path/to/wh_effects.csv --out data/wormhole-systems.json
+```
 - Moons
 - NPC corporations
 - Station operations

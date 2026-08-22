@@ -83,6 +83,17 @@ The app ships [`data/universe.json`](data/universe.json), a compact browser grap
 - Coordinates and security status
 - Regions and constellations
 - NPC station stops used by autocomplete
+- J-space class, environmental effect/type, and destination-labeled static wormhole codes from [`data/wormhole-systems.json`](data/wormhole-systems.json)
+
+Regenerate the J-space metadata from a `wh_effects.csv` export:
+
+```bash
+node scripts/import-wormhole-systems.mjs \
+  --input /path/to/wh_effects.csv \
+  --out data/wormhole-systems.json
+```
+
+The importer reads `sig2class.csv` beside the input CSV by default; pass `--destinations /path/to/sig2class.csv` to override it.
 
 Update the installed SDE locally:
 
