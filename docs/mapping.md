@@ -13,6 +13,7 @@ Splash includes a browser-local wormhole chain mapper alongside its route planne
 - Record optional system aliases.
 - Record connection signature, wormhole type, life, remaining mass, and ship-size class.
 - Removing an assigned signature also removes its corresponding mapped connection and the signature recorded at the opposite end.
+- Wormhole signatures expire 24 hours after they were last seen. Wormhole graph connections also expire 24 hours after creation, including unlabeled connections; the `<4h`, `<1h`, and expired life states shorten that deadline. Removing an expired connection also removes its assigned signatures on both ends, while mapped systems remain in place. Other unassigned signatures expire after three days.
 - Add individual cosmic signatures or import tab-separated rows copied from EVE's probe scanner with Ctrl+V, the Paste scan button, or the manual paste field. Strength and distance columns are ignored.
 - Persist the map in the same IndexedDB `kv` store used by the rest of Splash.
 

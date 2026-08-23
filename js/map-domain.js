@@ -4,10 +4,12 @@ const SIGNATURE_REFERENCE = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/i;
 const WORMHOLE_LIFE_STATES = ['stable', 'under-4h', 'under-1h', 'expired'];
 
 export const WORMHOLE_LIFE_DURATIONS = Object.freeze({
+  stable: 24 * 60 * 60 * 1_000,
   'under-4h': 4 * 60 * 60 * 1_000,
   'under-1h': 60 * 60 * 1_000,
   expired: 30 * 60 * 1_000
 });
+export const WORMHOLE_SIGNATURE_EXPIRY_MS = 24 * 60 * 60 * 1_000;
 export const SIGNATURE_EXPIRY_MS = 3 * 24 * 60 * 60 * 1_000;
 
 function isoNow(now) {
@@ -42,11 +44,9 @@ export function updateConnectionCondition(connection, updates = {}, now = Date.n
   const mass = updates.mass ?? connection?.mass;
   const size = updates.size ?? connection?.size;
   const currentExpiration = Date.parse(connection?.expiresAt);
-  const expiresAt = life === 'stable'
-    ? null
-    : life === previousLife && Number.isFinite(currentExpiration)
-      ? new Date(currentExpiration).toISOString()
-      : connectionLifeExpiresAt(life, timestamp);
+  const expiresAt = life === previousLife && Number.isFinite(currentExpiration)
+    ? new Date(currentExpiration).toISOString()
+    : connectionLifeExpiresAt(life, timestamp);
   return {
     ...connection,
     ...updates,
@@ -98,10 +98,14 @@ function normalizeConnection(connection, nodeIds) {
   const from = Number(connection?.from);
   const to = Number(connection?.to);
   if (!nodeIds.has(from) || !nodeIds.has(to) || from === to) return null;
+  const kind = connection.kind === 'gate' ? 'gate' : 'wormhole';
   const life = normalizeConnectionLife(connection.life);
   const parsedExpiration = Date.parse(connection.expiresAt);
-  const parsedBaseline = Date.parse(connection.updatedAt || connection.createdAt);
-  const expiresAt = life === 'stable'
+  const baseline = life === 'stable'
+    ? connection.createdAt || connection.updatedAt
+    : connection.updatedAt || connection.createdAt;
+  const parsedBaseline = Date.parse(baseline);
+  const expiresAt = kind === 'gate'
     ? null
     : Number.isFinite(parsedExpiration)
       ? new Date(parsedExpiration).toISOString()
@@ -110,7 +114,7 @@ function normalizeConnection(connection, nodeIds) {
     id: connectionId(from, to),
     from,
     to,
-    kind: connection.kind === 'gate' ? 'gate' : 'wormhole',
+    kind,
     type: cleanText(connection.type, 12).toUpperCase(),
     fromSignature: cleanText(connection.fromSignature, 7).toUpperCase(),
     toSignature: cleanText(connection.toSignature, 7).toUpperCase(),
@@ -225,16 +229,17 @@ export function addMapSystem(map, system, options = {}, now = () => new Date().t
   const id = connectionId(connectFrom, system.id);
   let connected = false;
   if (connectFrom && connectFrom !== Number(system.id) && nodes.some((node) => node.id === connectFrom) && !connections.some((connection) => connection.id === id)) {
+    const kind = options.kind === 'gate' ? 'gate' : 'wormhole';
     connections.push({
       id,
       from: connectFrom,
       to: Number(system.id),
-      kind: options.kind === 'gate' ? 'gate' : 'wormhole',
+      kind,
       type: '',
       fromSignature: '',
       toSignature: '',
       life: 'stable',
-      expiresAt: null,
+      expiresAt: kind === 'gate' ? null : connectionLifeExpiresAt('stable', timestamp),
       mass: 'stable',
       size: 'medium',
       source: options.source === 'tracked' ? 'tracked' : 'manual',
@@ -531,25 +536,31 @@ export function pruneExpiredConnections(map, now = Date.now()) {
 export function pruneExpiredSignatures(map, now = Date.now()) {
   const timestamp = millisecondsNow(now);
   const updatedAt = new Date(timestamp).toISOString();
-  const assigned = connectionSignatureRows(map);
   let changed = false;
   const signatures = {};
   Object.entries(map.signatures || {}).forEach(([systemId, rows]) => {
-    signatures[systemId] = rows.flatMap((signature) => {
-      if (signature.group === 'Wormhole' || assigned.get(Number(systemId))?.has(signature.id)) return [signature];
+    signatures[systemId] = rows.map((signature) => {
       const lastSeen = Date.parse(signature.updatedAt);
       if (!Number.isFinite(lastSeen)) {
         changed = true;
-        return [{ ...signature, updatedAt }];
+        return { ...signature, updatedAt };
       }
-      if (lastSeen + SIGNATURE_EXPIRY_MS <= timestamp) {
-        changed = true;
-        return [];
-      }
-      return [signature];
+      return signature;
     });
   });
-  return changed ? { ...map, signatures, updatedAt } : map;
+  let next = changed ? { ...map, signatures, updatedAt } : map;
+  const expired = [];
+  Object.entries(next.signatures || {}).forEach(([systemId, rows]) => {
+    rows.forEach((signature) => {
+      const lastSeen = Date.parse(signature.updatedAt);
+      const lifetime = signature.group === 'Wormhole' ? WORMHOLE_SIGNATURE_EXPIRY_MS : SIGNATURE_EXPIRY_MS;
+      if (lastSeen + lifetime <= timestamp) expired.push([Number(systemId), signature.id]);
+    });
+  });
+  expired.forEach(([systemId, signatureId]) => {
+    next = removeMapSignature(next, systemId, signatureId, () => updatedAt);
+  });
+  return next;
 }
 
 export function pruneExpiredMapItems(map, now = Date.now()) {
@@ -562,12 +573,11 @@ export function nextMapExpirationAt(map) {
     .filter((connection) => connection.kind !== 'gate')
     .map((connection) => Date.parse(connection.expiresAt))
     .filter(Number.isFinite);
-  const assigned = connectionSignatureRows(map);
-  Object.entries(map.signatures || {}).forEach(([systemId, rows]) => {
+  Object.values(map.signatures || {}).forEach((rows) => {
     rows.forEach((signature) => {
-      if (signature.group === 'Wormhole' || assigned.get(Number(systemId))?.has(signature.id)) return;
       const lastSeen = Date.parse(signature.updatedAt);
-      deadlines.push(Number.isFinite(lastSeen) ? lastSeen + SIGNATURE_EXPIRY_MS : 0);
+      const lifetime = signature.group === 'Wormhole' ? WORMHOLE_SIGNATURE_EXPIRY_MS : SIGNATURE_EXPIRY_MS;
+      deadlines.push(Number.isFinite(lastSeen) ? lastSeen + lifetime : 0);
     });
   });
   return deadlines.length ? Math.min(...deadlines) : null;

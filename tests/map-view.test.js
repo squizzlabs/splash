@@ -397,6 +397,98 @@ test('expired connection cleanup is persisted without deleting its systems', asy
   assert.deepEqual(messages, ['Wormhole connection expired and was removed.']);
 });
 
+test('old stable graph connections expire even when they have no signatures', async () => {
+  const systems = new Map([
+    [1, { id: 1, name: 'Alpha', regionId: 10, security: -1 }],
+    [2, { id: 2, name: 'Beta', regionId: 10, security: -1 }]
+  ]);
+  let storedMap = {
+    ...emptyMapState(),
+    nodes: [
+      { id: 1, name: 'Alpha', alias: '', source: 'manual', createdAt: null, updatedAt: null },
+      { id: 2, name: 'Beta', alias: '', source: 'manual', createdAt: null, updatedAt: null }
+    ],
+    connections: [{
+      id: '1:2',
+      from: 1,
+      to: 2,
+      kind: 'wormhole',
+      fromSignature: '',
+      toSignature: '',
+      life: 'stable',
+      expiresAt: null,
+      mass: 'stable',
+      size: 'medium',
+      createdAt: new Date(Date.now() - 47 * 60 * 60 * 1_000).toISOString(),
+      updatedAt: null
+    }],
+    signatures: {},
+    rootId: 1,
+    selectedSystemId: 1
+  };
+  const messages = [];
+  const view = new MapperView({
+    store: {
+      updateSetting: async (_key, updater) => {
+        storedMap = updater(storedMap);
+        return storedMap;
+      }
+    },
+    graph: { get: (id) => systems.get(Number(id)), regions: new Map([[10, { name: 'Test Region' }]]) },
+    toast: (message) => messages.push(message),
+    confirmAction: () => true,
+    portraitUrl: () => ''
+  });
+  view.map = storedMap;
+
+  assert.equal(await view.removeExpiredMapItems({ render: false }), 1);
+  assert.equal(storedMap.connections.length, 0);
+  assert.deepEqual(storedMap.nodes.map((node) => node.id), [1, 2]);
+  assert.deepEqual(messages, ['Wormhole connection expired and was removed.']);
+});
+
+test('expired wormhole signature cleanup persists removal of its connection and opposite signature', async () => {
+  const systems = new Map([
+    [1, { id: 1, name: 'Alpha', regionId: 10, security: -1 }],
+    [2, { id: 2, name: 'Beta', regionId: 10, security: -1 }]
+  ]);
+  let storedMap = {
+    ...emptyMapState(),
+    nodes: [
+      { id: 1, name: 'Alpha', alias: '', source: 'manual', createdAt: null, updatedAt: null },
+      { id: 2, name: 'Beta', alias: '', source: 'manual', createdAt: null, updatedAt: null }
+    ],
+    connections: [{ id: '1:2', from: 1, to: 2, kind: 'wormhole', fromSignature: 'OLD-123', toSignature: 'NEW-456', life: 'stable', expiresAt: null, mass: 'stable', size: 'medium' }],
+    signatures: {
+      1: [{ id: 'OLD-123', group: 'Wormhole', type: '', name: '', updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1_000 - 1_000).toISOString() }],
+      2: [{ id: 'NEW-456', group: 'Wormhole', type: '', name: '', updatedAt: new Date().toISOString() }]
+    },
+    rootId: 1,
+    selectedSystemId: 1
+  };
+  const messages = [];
+  const view = new MapperView({
+    store: {
+      updateSetting: async (_key, updater) => {
+        storedMap = updater(storedMap);
+        return storedMap;
+      }
+    },
+    graph: { get: (id) => systems.get(Number(id)), regions: new Map([[10, { name: 'Test Region' }]]) },
+    toast: (message) => messages.push(message),
+    confirmAction: () => true,
+    portraitUrl: () => ''
+  });
+  view.map = storedMap;
+
+  assert.equal(await view.removeExpiredMapItems({ render: false }), 3);
+  assert.equal(storedMap.connections.length, 0);
+  assert.deepEqual(storedMap.signatures[1], []);
+  assert.deepEqual(storedMap.signatures[2], []);
+  assert.deepEqual(storedMap.nodes.map((node) => node.id), [1, 2]);
+  assert.deepEqual(messages, ['Wormhole connection and 2 signatures expired and were removed.']);
+});
+
 test('the line editor updates a wormhole condition', async () => {
   const previousDocument = globalThis.document;
   const previousAnimationFrame = globalThis.requestAnimationFrame;

@@ -249,16 +249,16 @@ test('previous unresolved imports migrate from Unknown to Cosmic Signature', () 
   assert.equal(map.signatures[1][0].group, 'Cosmic Signature');
 });
 
-test('non-wormhole signatures expire three days after they were last seen', () => {
+test('wormhole signatures expire after one day and other signatures expire after three days', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = upsertSignatures(map, 1, [
     { id: 'DAT-001', group: 'Data Site', updatedAt: '2026-08-17T12:00:00.000Z' },
     { id: 'REL-002', group: 'Relic Site', updatedAt: '2026-08-17T12:00:00.001Z' },
-    { id: 'WHL-003', group: 'Wormhole', updatedAt: '2026-08-01T00:00:00.000Z' }
+    { id: 'WHL-003', group: 'Wormhole', updatedAt: '2026-08-19T12:00:00.000Z' }
   ], now);
   assert.equal(nextMapExpirationAt(map), Date.parse(now()));
   map = pruneExpiredSignatures(map, now);
-  assert.deepEqual(map.signatures[1].map((signature) => signature.id), ['REL-002', 'WHL-003']);
+  assert.deepEqual(map.signatures[1].map((signature) => signature.id), ['REL-002']);
 });
 
 test('seeing a non-wormhole signature again refreshes its three-day lifetime', () => {
@@ -269,21 +269,28 @@ test('seeing a non-wormhole signature again refreshes its three-day lifetime', (
   assert.equal(map.signatures[1][0].updatedAt, now());
 });
 
-test('legacy signatures without an age start their three-day timer on migration', () => {
+test('legacy signatures without an age start their expiration timer on migration', () => {
   const map = pruneExpiredSignatures({
     ...emptyMapState(),
-    signatures: { 1: [{ id: 'GAS-001', group: 'Gas Site', type: '', name: '', updatedAt: null }] }
+    signatures: { 1: [
+      { id: 'GAS-001', group: 'Gas Site', type: '', name: '', updatedAt: null },
+      { id: 'WHL-001', group: 'Wormhole', type: '', name: '', updatedAt: null }
+    ] }
   }, now);
   assert.equal(map.signatures[1][0].updatedAt, now());
+  assert.equal(map.signatures[1][1].updatedAt, now());
 });
 
-test('assigned signatures are exempt from the three-day site cleanup', () => {
+test('an expired wormhole signature removes its connection and opposite signature', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
-  map = upsertSignatures(map, 1, [{ id: 'OLD-123', group: 'Cosmic Signature', updatedAt: '2026-08-01T00:00:00.000Z' }], now);
-  map = assignConnectionSignature(map, '1:3', 1, 'OLD-123', () => '2026-08-01T00:00:00.000Z');
+  map = assignConnectionSignature(map, '1:3', 1, 'OLD-123', () => '2026-08-19T11:59:59.000Z');
+  map = assignConnectionSignature(map, '1:3', 3, 'NEW-456', now);
   map = pruneExpiredMapItems(map, now);
-  assert.equal(map.signatures[1][0].id, 'OLD-123');
+  assert.equal(map.connections.length, 0);
+  assert.deepEqual(map.signatures[1], []);
+  assert.deepEqual(map.signatures[3], []);
+  assert.deepEqual(map.nodes.map((node) => node.id), [1, 3]);
 });
 
 test('editing a signature updates its details and its connection-side reference', () => {
@@ -364,8 +371,21 @@ test('wormhole lifetime changes set and preserve the correct deletion deadlines'
   assert.equal(underOne.expiresAt, '2026-08-20T14:00:00.000Z');
   const expired = updateConnectionCondition(underOne, { life: 'expired' }, now);
   assert.equal(expired.expiresAt, '2026-08-20T12:30:00.000Z');
-  assert.equal(connectionLifeExpiresAt('stable', now), null);
-  assert.equal(updateConnectionCondition(expired, { life: 'stable' }, now).expiresAt, null);
+  assert.equal(connectionLifeExpiresAt('stable', now), '2026-08-21T12:00:00.000Z');
+  assert.equal(updateConnectionCondition(expired, { life: 'stable' }, now).expiresAt, '2026-08-21T12:00:00.000Z');
+});
+
+test('stable wormhole connections expire one day after creation even without signatures', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
+  map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
+  assert.equal(map.connections[0].expiresAt, '2026-08-21T12:00:00.000Z');
+
+  const legacy = normalizeMapState({
+    nodes: [{ id: 1 }, { id: 3 }],
+    connections: [{ from: 1, to: 3, life: 'stable', createdAt: '2026-08-19T11:59:59.000Z' }]
+  }, graph);
+  assert.equal(legacy.connections[0].expiresAt, '2026-08-20T11:59:59.000Z');
+  assert.equal(pruneExpiredConnections(legacy, now).connections.length, 0);
 });
 
 test('legacy end-of-life connections migrate to the under-four-hour timer', () => {

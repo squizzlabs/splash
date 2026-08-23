@@ -112,7 +112,7 @@ function connectionLifeOptions(selectedLife) {
 }
 
 function connectionCountdownText(connection, now = Date.now()) {
-  if (!connection || connection.life === 'stable') return 'Stable · no automatic deletion';
+  if (!connection) return '';
   const expiration = Date.parse(connection.expiresAt);
   if (!Number.isFinite(expiration)) return 'Timer starts when saved';
   const remaining = Math.max(0, expiration - now);
@@ -122,7 +122,14 @@ function connectionCountdownText(connection, now = Date.now()) {
   const minutes = Math.floor((totalSeconds % 3_600) / 60);
   const seconds = totalSeconds % 60;
   const duration = hours ? `${hours}h ${minutes}m` : `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-  return `${connection.life === 'expired' ? 'Expired' : connection.life === 'under-1h' ? '<1 hour' : '<4 hours'} · auto-deletes in ${duration}`;
+  const life = connection.life === 'expired'
+    ? 'Expired'
+    : connection.life === 'under-1h'
+      ? '<1 hour'
+      : connection.life === 'under-4h'
+        ? '<4 hours'
+        : 'Stable';
+  return `${life} · auto-deletes in ${duration}`;
 }
 
 export function normalizeMapLayoutSpacing(value) {
@@ -736,7 +743,7 @@ export class MapperView {
       const current = normalizeMapState(value, this.graph);
       const withoutExpiredConnections = pruneExpiredConnections(current);
       const next = pruneExpiredSignatures(withoutExpiredConnections);
-      removedConnections = current.connections.length - withoutExpiredConnections.connections.length;
+      removedConnections = current.connections.length - next.connections.length;
       removedSignatures = signatureCount(withoutExpiredConnections) - signatureCount(next);
       const needsLifetimeMigration = (value?.connections || []).some((connection) => {
         const normalized = current.connections.find((candidate) => candidate.id === connectionId(connection.from, connection.to));
