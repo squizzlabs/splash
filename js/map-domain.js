@@ -1,7 +1,9 @@
-const MAP_VERSION = 1;
+const MAP_VERSION = 2;
 const SCANNER_SIGNATURE_ID = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/i;
 const SIGNATURE_REFERENCE = /^[A-Z0-9]{3}(?:-[A-Z0-9]{3})?$/i;
 const WORMHOLE_LIFE_STATES = ['stable', 'under-4h', 'under-1h', 'expired'];
+
+export const MOVEMENT_OBSERVATION_WINDOW_MS = 10_000;
 
 export const WORMHOLE_LIFE_DURATIONS = Object.freeze({
   stable: 24 * 60 * 60 * 1_000,
@@ -66,6 +68,7 @@ export function emptyMapState() {
     connections: [],
     signatures: {},
     lastLocations: {},
+    lastLocationObservedAt: {},
     rootId: null,
     selectedSystemId: null,
     autoTrack: true,
@@ -179,6 +182,13 @@ export function normalizeMapState(value, graph) {
   Object.entries(value.lastLocations || {}).forEach(([characterId, systemId]) => {
     if (Number.isSafeInteger(Number(characterId)) && graph?.get(Number(systemId))) lastLocations[characterId] = Number(systemId);
   });
+  const lastLocationObservedAt = {};
+  Object.entries(value.lastLocationObservedAt || {}).forEach(([characterId, observedAt]) => {
+    const timestamp = Date.parse(observedAt);
+    if (Object.prototype.hasOwnProperty.call(lastLocations, characterId) && Number.isFinite(timestamp)) {
+      lastLocationObservedAt[characterId] = new Date(timestamp).toISOString();
+    }
+  });
   const savedLayoutSpacing = typeof value.layoutSpacing === 'number' ? value.layoutSpacing : Number.NaN;
   const normalizedLayoutSpacing = Number.isFinite(savedLayoutSpacing)
     ? Math.min(100, Math.max(0, savedLayoutSpacing))
@@ -191,6 +201,7 @@ export function normalizeMapState(value, graph) {
     connections,
     signatures,
     lastLocations,
+    lastLocationObservedAt,
     rootId,
     selectedSystemId,
     autoTrack: value.autoTrack !== false,
@@ -345,8 +356,11 @@ export function removeMapSystem(map, systemId, now = () => new Date().toISOStrin
   const signatures = { ...withoutConnections.signatures };
   delete signatures[id];
   const lastLocations = { ...withoutConnections.lastLocations };
+  const lastLocationObservedAt = { ...withoutConnections.lastLocationObservedAt };
   Object.entries(lastLocations).forEach(([characterId, locationId]) => {
-    if (locationId === id) delete lastLocations[characterId];
+    if (locationId !== id) return;
+    delete lastLocations[characterId];
+    delete lastLocationObservedAt[characterId];
   });
   const rootId = map.rootId === id ? nodes[0]?.id || null : map.rootId;
   return {
@@ -354,6 +368,7 @@ export function removeMapSystem(map, systemId, now = () => new Date().toISOStrin
     nodes,
     signatures,
     lastLocations,
+    lastLocationObservedAt,
     rootId,
     selectedSystemId: map.selectedSystemId === id ? rootId : map.selectedSystemId,
     updatedAt: timestamp
@@ -366,15 +381,17 @@ function nodeDegree(map, systemId) {
 
 export function resetOfflineCharacterTracking(map, characters, now = () => new Date().toISOString()) {
   const lastLocations = { ...map.lastLocations };
+  const lastLocationObservedAt = { ...map.lastLocationObservedAt };
   let changed = false;
   (Array.isArray(characters) ? characters : []).forEach((character) => {
     if (character?.presence?.online === true) return;
     const characterId = String(Number(character.id));
     if (!Object.prototype.hasOwnProperty.call(lastLocations, characterId)) return;
     delete lastLocations[characterId];
+    delete lastLocationObservedAt[characterId];
     changed = true;
   });
-  return changed ? { ...map, lastLocations, updatedAt: isoNow(now) } : map;
+  return changed ? { ...map, lastLocations, lastLocationObservedAt, updatedAt: isoNow(now) } : map;
 }
 
 export function observeCharacterMovements(map, characters, graph, now = () => new Date().toISOString()) {
@@ -383,15 +400,39 @@ export function observeCharacterMovements(map, characters, graph, now = () => ne
   let changed = next !== map;
   const changes = [];
   const lastLocations = { ...next.lastLocations };
+  const lastLocationObservedAt = { ...next.lastLocationObservedAt };
   (Array.isArray(characters) ? characters : []).forEach((character) => {
     const characterId = String(Number(character.id));
     if (character?.presence?.online !== true) return;
-    if (!character.location?.id) return;
+    if (character.locationError || !character.location?.id) {
+      if (Object.prototype.hasOwnProperty.call(lastLocations, characterId)) {
+        delete lastLocations[characterId];
+        delete lastLocationObservedAt[characterId];
+        changed = true;
+      }
+      return;
+    }
     const currentId = Number(character.location.id);
     const current = graph?.get(currentId);
-    if (!current) return;
+    if (!current) {
+      if (Object.prototype.hasOwnProperty.call(lastLocations, characterId)) {
+        delete lastLocations[characterId];
+        delete lastLocationObservedAt[characterId];
+        changed = true;
+      }
+      return;
+    }
+    const locationTimestamp = Date.parse(character.location.updatedAt);
+    const currentObservedAt = Number.isFinite(locationTimestamp) ? locationTimestamp : millisecondsNow(now);
     const previousId = Number(lastLocations[characterId]) || null;
-    if (!previousId) {
+    const previousObservedAt = Date.parse(lastLocationObservedAt[characterId]);
+    if (Number.isFinite(previousObservedAt) && currentObservedAt < previousObservedAt) return;
+    const elapsed = currentObservedAt - previousObservedAt;
+    const canInferMovement = previousId
+      && Number.isFinite(previousObservedAt)
+      && elapsed >= 0
+      && elapsed <= MOVEMENT_OBSERVATION_WINDOW_MS;
+    if (!previousId || (previousId !== currentId && !canInferMovement)) {
       const result = addMapSystem(next, current, { source: 'tracked' }, now);
       next = result.map;
       changed ||= result.added;
@@ -441,12 +482,14 @@ export function observeCharacterMovements(map, characters, graph, now = () => ne
         }
       }
     }
-    if (lastLocations[characterId] !== currentId) {
+    const observedAt = new Date(currentObservedAt).toISOString();
+    if (lastLocations[characterId] !== currentId || lastLocationObservedAt[characterId] !== observedAt) {
       lastLocations[characterId] = currentId;
+      lastLocationObservedAt[characterId] = observedAt;
       changed = true;
     }
   });
-  if (changed) next = { ...next, lastLocations, updatedAt: isoNow(now) };
+  if (changed) next = { ...next, lastLocations, lastLocationObservedAt, updatedAt: isoNow(now) };
   return { map: next, changes };
 }
 

@@ -277,10 +277,11 @@ test('status refreshes clear offline tracking without observing stale online loc
   await view.observeCharacters([{ id: 99, presence: { online: true }, location: { id: 1 } }], { trackMovements: false });
   assert.deepEqual(storedMap.lastLocations, {});
 
-  await view.observeCharacters([{ id: 99, presence: { online: true }, location: { id: 3 } }]);
+  await view.observeCharacters([{ id: 99, presence: { online: true }, location: { id: 3, updatedAt: '2026-08-20T12:00:00.000Z' } }]);
   assert.deepEqual(storedMap.nodes.map((node) => node.id), [1, 3]);
   assert.equal(storedMap.connections.length, 0);
   assert.deepEqual(storedMap.lastLocations, { 99: 3 });
+  assert.deepEqual(storedMap.lastLocationObservedAt, { 99: '2026-08-20T12:00:00.000Z' });
 });
 
 test('dropping an unassigned signature on a system creates and labels its connection', async () => {

@@ -11,6 +11,7 @@ import {
   fitChainViewport,
   mapRoutingConnections,
   mapWormholeStepsForPath,
+  MOVEMENT_OBSERVATION_WINDOW_MS,
   nextMapExpirationAt,
   normalizeMapState,
   observeCharacterMovements,
@@ -37,6 +38,7 @@ const systems = new Map([
 ]);
 const graph = { get: (id) => systems.get(Number(id)) || null };
 const now = () => '2026-08-20T12:00:00.000Z';
+const observedAt = '2026-08-20T12:00:00.000Z';
 
 test('map connection style defaults to pipe and preserves the curve option', () => {
   assert.equal(emptyMapState().connectionStyle, 'pipe');
@@ -68,7 +70,7 @@ test('manual systems connect to the selected chain node without duplicate edges'
 test('manually selecting an auto-tracked root pins it against gate-follow replacement', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), { source: 'tracked' }, now).map;
   map = addMapSystem(map, systems.get(1), {}, now).map;
-  map = { ...map, lastLocations: { 99: 1 } };
+  map = { ...map, lastLocations: { 99: 1 }, lastLocationObservedAt: { 99: observedAt } };
   map = observeCharacterMovements(map, [{ id: 99, presence: { online: true }, location: { id: 2 } }], graph, now).map;
   assert.deepEqual(map.nodes.map((node) => node.id), [1]);
   assert.equal(map.nodes[0].source, 'manual');
@@ -111,17 +113,84 @@ test('returning through an existing wormhole still emits a jump for the unmapped
   }]);
 });
 
+test('automatic connections require consecutive observations no more than ten seconds apart', () => {
+  const online = (locationId, updatedAt) => ({
+    id: 99,
+    presence: { online: true },
+    location: { id: locationId, updatedAt }
+  });
+  const firstObservedAt = '2026-08-20T12:00:00.000Z';
+  const boundaryObservedAt = new Date(Date.parse(firstObservedAt) + MOVEMENT_OBSERVATION_WINDOW_MS).toISOString();
+  let map = observeCharacterMovements(emptyMapState(), [online(1, firstObservedAt)], graph, () => firstObservedAt).map;
+
+  const result = observeCharacterMovements(map, [online(3, boundaryObservedAt)], graph, () => boundaryObservedAt);
+
+  assert.equal(result.map.connections.length, 1);
+  assert.deepEqual(result.changes.map((change) => change.type), ['connection', 'wormhole-jump']);
+});
+
+test('a location polling gap over ten seconds starts a fresh cursor without a connection', () => {
+  const online = (locationId, updatedAt) => ({
+    id: 99,
+    presence: { online: true },
+    location: { id: locationId, updatedAt }
+  });
+  const firstObservedAt = '2026-08-20T12:00:00.000Z';
+  const staleObservedAt = new Date(Date.parse(firstObservedAt) + MOVEMENT_OBSERVATION_WINDOW_MS + 1).toISOString();
+  let map = observeCharacterMovements(emptyMapState(), [online(1, firstObservedAt)], graph, () => firstObservedAt).map;
+
+  const result = observeCharacterMovements(map, [online(3, staleObservedAt)], graph, () => staleObservedAt);
+
+  assert.deepEqual(result.map.nodes.map((node) => node.id), [1, 3]);
+  assert.equal(result.map.connections.length, 0);
+  assert.deepEqual(result.changes, [{ type: 'system', systemId: 3, characterId: 99 }]);
+  assert.deepEqual(result.map.lastLocations, { 99: 3 });
+  assert.deepEqual(result.map.lastLocationObservedAt, { 99: staleObservedAt });
+});
+
+test('a failed location call breaks the consecutive observation chain', () => {
+  const firstObservedAt = '2026-08-20T12:00:00.000Z';
+  const recoveredAt = '2026-08-20T12:00:08.000Z';
+  const online = (locationId, updatedAt, locationError = null) => ({
+    id: 99,
+    presence: { online: true },
+    location: { id: locationId, updatedAt },
+    locationError
+  });
+  let map = observeCharacterMovements(emptyMapState(), [online(1, firstObservedAt)], graph, () => firstObservedAt).map;
+
+  map = observeCharacterMovements(map, [online(1, firstObservedAt, 'Location is unavailable.')], graph, () => '2026-08-20T12:00:04.000Z').map;
+  assert.deepEqual(map.lastLocations, {});
+  assert.deepEqual(map.lastLocationObservedAt, {});
+
+  const result = observeCharacterMovements(map, [online(3, recoveredAt)], graph, () => recoveredAt);
+  assert.equal(result.map.connections.length, 0);
+  assert.deepEqual(result.changes, [{ type: 'system', systemId: 3, characterId: 99 }]);
+});
+
+test('legacy ID-only tracking cursors cannot create a connection after migration', () => {
+  let map = addMapSystem(emptyMapState(), systems.get(1), { source: 'tracked' }, now).map;
+  map = normalizeMapState({ ...map, version: 1, lastLocations: { 99: 1 } }, graph);
+  assert.deepEqual(map.lastLocationObservedAt, {});
+
+  const result = observeCharacterMovements(map, [{ id: 99, presence: { online: true }, location: { id: 3, updatedAt: observedAt } }], graph, now);
+
+  assert.equal(result.map.connections.length, 0);
+  assert.deepEqual(result.map.nodes.map((node) => node.id), [1, 3]);
+});
+
 test('a missed intermediate system does not create a shortcut across the mapped chain', () => {
   let map = addMapSystem(emptyMapState(), systems.get(1), {}, now).map;
   map = addMapSystem(map, systems.get(3), { connectFrom: 1 }, now).map;
   map = addMapSystem(map, systems.get(4), { connectFrom: 3 }, now).map;
-  map = { ...map, lastLocations: { 99: 1 } };
+  map = { ...map, lastLocations: { 99: 1 }, lastLocationObservedAt: { 99: observedAt } };
 
   const result = observeCharacterMovements(map, [{ id: 99, presence: { online: true }, location: { id: 4 } }], graph, now);
 
   assert.deepEqual(result.map.connections.map((connection) => connection.id), ['1:3', '3:4']);
   assert.deepEqual(result.changes, []);
   assert.deepEqual(result.map.lastLocations, { 99: 4 });
+  assert.deepEqual(result.map.lastLocationObservedAt, { 99: observedAt });
 });
 
 test('offline characters do not add to the chain or create a tracking cursor', () => {
@@ -137,11 +206,13 @@ test('an offline observation breaks movement tracking before the pilot reconnect
 
   map = observeCharacterMovements(map, [offline(1)], graph, now).map;
   assert.deepEqual(map.lastLocations, {});
+  assert.deepEqual(map.lastLocationObservedAt, {});
 
   const result = observeCharacterMovements(map, [online(3)], graph, now);
   assert.deepEqual(result.map.nodes.map((node) => node.id), [1, 3]);
   assert.equal(result.map.connections.length, 0);
   assert.deepEqual(result.map.lastLocations, { 99: 3 });
+  assert.deepEqual(result.map.lastLocationObservedAt, { 99: observedAt });
   assert.deepEqual(result.changes, [{ type: 'system', systemId: 3, characterId: 99 }]);
 });
 

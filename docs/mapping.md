@@ -27,7 +27,9 @@ ESI provides a character's current solar system but does not identify how the ch
 
 - A known stargate move advances the tracking cursor and does not create a wormhole edge.
 - A system change with no stargate adjacency creates a connection and asks which origin-side wormhole signature was used. The mapper never guesses between multiple signatures with the same generic name.
+- Automatic movement inference requires two consecutive successful location responses no more than 10 seconds apart. A longer polling gap starts a fresh cursor at the newer system without creating a connection.
 - Both system observations must occur while the pilot is online. Seeing a pilot offline clears their movement cursor, so reconnecting in another system does not create a connection across the offline gap.
+- A failed or unusable location response also clears the movement cursor, so later recovery cannot connect across a missed observation.
 
 Jump bridges, cynos, filaments, and other non-gate travel can therefore look like a wormhole to a browser-only observer. Automatically created connections are intentionally unclassified until a mapper supplies signature and type details.
 
