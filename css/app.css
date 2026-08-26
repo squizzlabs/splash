@@ -361,20 +361,12 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
 .map-section-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; color: var(--text); background: var(--panel-strong); border: 1px solid var(--line); border-radius: 9px; font-size: 9px; font-weight: 800; }
 .map-paste-button { min-height: 27px; gap: 5px; padding: 0 9px; font-size: 9px; }
 .map-paste-icon { flex: 0 0 13px; width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.map-exit-card { padding: 6px; margin-top: 4px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 5px; }
-.map-exit-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
-.map-exit-heading > button:first-child { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; color: var(--text); background: none; border: 0; font-size: 11px; font-weight: 780; }
-.map-exit-heading > button:first-child span { flex: 0 0 auto; padding: 2px 5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 4px; font: 750 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .map-inline-remove { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 4px; line-height: 1; }
 .map-inline-remove:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .map-exit-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .map-exit-fields label { display: grid; gap: 3px; color: var(--metadata); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .map-exit-fields select, .map-exit-fields input { width: 100%; min-width: 0; min-height: 27px; padding: 0 6px; color: var(--text); font-size: 10px; text-transform: none; }
 .map-exit-fields select { padding-right: 18px; }
-.map-exit-identifiers { grid-template-columns: 1fr 1fr; margin-top: 4px; }
-.map-unassigned-connections { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
-.map-unassigned-connections > summary { display: flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 9px; font-weight: 750; cursor: pointer; }
-.map-unassigned-connections > summary::marker { color: var(--muted-strong); }
 .map-signature-manual, .map-signature-import { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line-soft); }
 .map-signature-manual summary, .map-signature-import summary { color: var(--muted-strong); font-size: 9px; font-weight: 750; cursor: pointer; }
 .map-signature-form { display: grid; grid-template-columns: 70px 1fr; gap: 4px; margin-top: 5px; }

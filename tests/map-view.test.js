@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { emptyMapState } from '../js/map-domain.js';
-import { computeMapLayout, curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, normalizeMapLayoutSpacing, MapperView, wormholeSystemDisplay } from '../js/map-view.js';
+import { computeMapLayout, curvedMapConnectionPath, mapConnectionPath, mapConnectionPaths, mapSystemSignatureRows, normalizeMapLayoutSpacing, MapperView, wormholeSystemDisplay } from '../js/map-view.js';
 
 test('the jump prompt keeps Map connection enabled for custom signatures', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -137,6 +137,41 @@ test('wide sibling groups use one centered branch rail without crossings', () =>
   assert.equal(paths.get('1:4'), 'M 693 72 L 693 99 L 1188 99 L 1188 126');
 });
 
+test('every wormhole connection has a signature row on both sides', () => {
+  const map = {
+    signatures: {
+      1: [
+        { id: 'ABC-123', group: 'Wormhole', type: 'Unstable Wormhole' },
+        { id: 'DAT-456', group: 'Data Site', type: 'Central Ruins' }
+      ]
+    },
+    connections: [
+      { id: '1:2', from: 1, to: 2, kind: 'wormhole', fromSignature: 'ABC-123', toSignature: '' },
+      { id: '1:3', from: 1, to: 3, kind: 'wormhole', fromSignature: '', toSignature: '' },
+      { id: '1:4', from: 1, to: 4, kind: 'gate', fromSignature: '', toSignature: '' }
+    ]
+  };
+
+  assert.deepEqual(mapSystemSignatureRows(map, 1).map(({ signature, connection, synthetic }) => ({
+    id: signature.id,
+    group: signature.group,
+    connectionId: connection?.id || null,
+    synthetic
+  })), [
+    { id: 'ABC-123', group: 'Wormhole', connectionId: '1:2', synthetic: false },
+    { id: 'DAT-456', group: 'Data Site', connectionId: null, synthetic: false },
+    { id: '???-???', group: 'Wormhole', connectionId: '1:3', synthetic: true }
+  ]);
+  assert.deepEqual(mapSystemSignatureRows(map, 2).map(({ signature, connection, synthetic }) => ({
+    id: signature.id,
+    group: signature.group,
+    connectionId: connection.id,
+    synthetic
+  })), [
+    { id: '???-???', group: 'Wormhole', connectionId: '1:2', synthetic: true }
+  ]);
+});
+
 test('the inspector folds connection settings into the matching signature editor', () => {
   const container = { innerHTML: '' };
   const previousDocument = globalThis.document;
@@ -191,11 +226,94 @@ test('the inspector folds connection settings into the matching signature editor
     view.editingSignature = null;
     view.map.connections[0].fromSignature = '';
     view.renderInspector();
-    assert.match(container.innerHTML, /Unassigned exits/);
-    assert.match(container.innerHTML, /data-map-connection-field="nearSignature"/);
+    assert.doesNotMatch(container.innerHTML, /Unassigned exits/);
+    assert.match(container.innerHTML, /data-map-edit-signature="\?\?\?-\?\?\?"/);
+    assert.match(container.innerHTML, /aria-label="Edit signature \?\?\?-\?\?\?">\?\?\?-\?\?\?<\/button>/);
+    assert.match(container.innerHTML, /<td class="map-signature-group">Wormhole<\/td>/);
+
+    view.editingSignature = { systemId: 1, id: '???-???', connectionId: '1:2' };
+    view.renderInspector();
+    assert.match(container.innerHTML, /data-map-synthetic-connection-id="1:2"/);
+    assert.match(container.innerHTML, /name="id" maxlength="7" value="" placeholder="ABC-123"/);
+    assert.match(container.innerHTML, /name="connectionLife"/);
   } finally {
     globalThis.document = previousDocument;
   }
+});
+
+test('editing an unknown connection row records its real wormhole signature', async () => {
+  const systems = new Map([
+    [1, { id: 1, name: 'Alpha', regionId: 10, security: -1 }],
+    [2, { id: 2, name: 'Beta', regionId: 10, security: -1 }]
+  ]);
+  let storedMap = {
+    ...emptyMapState(),
+    nodes: [
+      { id: 1, name: 'Alpha', alias: '', source: 'manual', createdAt: null, updatedAt: null },
+      { id: 2, name: 'Beta', alias: '', source: 'manual', createdAt: null, updatedAt: null }
+    ],
+    connections: [{
+      id: '1:2',
+      from: 1,
+      to: 2,
+      kind: 'wormhole',
+      type: '',
+      fromSignature: '',
+      toSignature: '',
+      life: 'stable',
+      expiresAt: null,
+      mass: 'stable',
+      size: 'medium',
+      source: 'manual',
+      createdAt: null,
+      updatedAt: null
+    }],
+    selectedSystemId: 1,
+    rootId: 1
+  };
+  const messages = [];
+  const view = new MapperView({
+    store: {
+      updateSetting: async (_key, updater) => {
+        storedMap = updater(storedMap);
+        return storedMap;
+      }
+    },
+    graph: { get: (id) => systems.get(Number(id)), regions: new Map([[10, { name: 'Test Region' }]]) },
+    toast: (message) => messages.push(message),
+    confirmAction: () => true,
+    portraitUrl: () => ''
+  });
+  view.map = storedMap;
+  view.render = () => {};
+  const values = new Map([
+    ['id', 'abc-123'],
+    ['group', 'Wormhole'],
+    ['type', 'Unstable Wormhole'],
+    ['connectionLife', 'under-4h'],
+    ['connectionMass', 'reduced'],
+    ['connectionSize', 'large'],
+    ['connectionType', 'k162']
+  ]);
+  const form = {
+    dataset: {
+      mapSignatureEditForm: '',
+      mapSyntheticConnectionId: '1:2',
+      mapConnectionId: '1:2'
+    },
+    elements: { namedItem: (name) => ({ value: values.get(name) }) }
+  };
+
+  assert.equal(await view.saveSignatureEdit(form), true);
+  assert.deepEqual(storedMap.signatures[1].map(({ id, group, type }) => ({ id, group, type })), [
+    { id: 'ABC-123', group: 'Wormhole', type: 'Unstable Wormhole' }
+  ]);
+  assert.equal(storedMap.connections[0].fromSignature, 'ABC-123');
+  assert.equal(storedMap.connections[0].life, 'under-4h');
+  assert.equal(storedMap.connections[0].mass, 'reduced');
+  assert.equal(storedMap.connections[0].size, 'large');
+  assert.equal(storedMap.connections[0].type, 'K162');
+  assert.deepEqual(messages, ['ABC-123 updated.']);
 });
 
 test('map mutations start from the latest cross-tab state', async () => {

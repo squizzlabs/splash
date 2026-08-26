@@ -215,6 +215,51 @@ function signatureCount(map) {
   return Object.values(map?.signatures || {}).reduce((count, rows) => count + rows.length, 0);
 }
 
+function localConnectionSignature(connection, systemId) {
+  return String((connection.from === Number(systemId) ? connection.fromSignature : connection.toSignature) || '').toUpperCase();
+}
+
+function recordedSignatureForConnection(signatures, connection, systemId) {
+  const connectionSignature = localConnectionSignature(connection, systemId);
+  if (!connectionSignature) return null;
+  const exact = signatures.find((signature) => signature.id === connectionSignature);
+  if (exact) return exact;
+  if (!/^[A-Z0-9]{3}$/.test(connectionSignature)) return null;
+  const prefixMatches = signatures.filter((signature) => signature.id.startsWith(`${connectionSignature}-`));
+  return prefixMatches.length === 1 ? prefixMatches[0] : null;
+}
+
+export function mapSystemSignatureRows(map, systemId) {
+  const id = Number(systemId);
+  const signatures = map?.signatures?.[id] || [];
+  const connections = (map?.connections || []).filter((connection) => connection.kind !== 'gate'
+    && (connection.from === id || connection.to === id));
+  const connectionSignatures = new Map(connections.map((connection) => [
+    connection.id,
+    recordedSignatureForConnection(signatures, connection, id)
+  ]));
+  const rows = signatures.map((signature) => ({
+    signature,
+    connection: connections.find((candidate) => connectionSignatures.get(candidate.id)?.id === signature.id) || null,
+    synthetic: false
+  }));
+  connections.forEach((connection) => {
+    if (connectionSignatures.get(connection.id)) return;
+    rows.push({
+      signature: {
+        id: localConnectionSignature(connection, id) || '???-???',
+        group: 'Wormhole',
+        type: '',
+        name: '',
+        updatedAt: connection.updatedAt || connection.createdAt || null
+      },
+      connection,
+      synthetic: true
+    });
+  });
+  return rows;
+}
+
 export class MapperView {
   constructor({ store, graph, toast, confirmAction, portraitUrl, activeCharacterId = null, onSystemSelected = () => {} }) {
     this.store = store;
@@ -397,7 +442,7 @@ export class MapperView {
       const region = this.graph.regions.get(system.regionId)?.name || 'Unknown region';
       const wormhole = wormholeSystemDisplay(system);
       const pilots = pilotGroups.get(node.id) || [];
-      const signatures = this.map.signatures[node.id]?.length || 0;
+      const signatures = mapSystemSignatureRows(this.map, node.id).length;
       const selected = this.map.selectedSystemId === node.id;
       const metadata = `${systemClass(system)} · ${region}`;
       const wormholeStaticLines = wormhole
@@ -440,50 +485,19 @@ export class MapperView {
     }
     const region = this.graph.regions.get(system.regionId)?.name || 'Unknown region';
     const wormhole = wormholeSystemDisplay(system);
-    const connections = this.map.connections.filter((connection) => connection.from === node.id || connection.to === node.id);
-    const signatures = this.map.signatures[node.id] || [];
-    const localConnectionSignature = (connection) => String(connection.from === node.id ? connection.fromSignature : connection.toSignature).toUpperCase();
-    const signatureForConnection = (connection) => {
-      const connectionSignature = localConnectionSignature(connection);
-      if (!connectionSignature) return null;
-      const exact = signatures.find((signature) => signature.id === connectionSignature);
-      if (exact) return exact;
-      if (!/^[A-Z0-9]{3}$/.test(connectionSignature)) return null;
-      const prefixMatches = signatures.filter((signature) => signature.id.startsWith(`${connectionSignature}-`));
-      return prefixMatches.length === 1 ? prefixMatches[0] : null;
-    };
-    const unassignedConnections = connections.filter((connection) => !signatureForConnection(connection));
-    const unassignedExits = unassignedConnections.map((connection) => {
-      const otherId = connection.from === node.id ? connection.to : connection.from;
-      const other = this.graph.get(otherId);
-      return `<article class="map-exit-card" data-map-connection-card="${connection.id}">
-        <div class="map-exit-heading">
-          <button type="button" data-map-select-system="${otherId}"><span>${svgEscape(connection.from === node.id ? connection.fromSignature || '???-???' : connection.toSignature || '???-???')}</span>${svgEscape(other?.name || otherId)}</button>
-          <button class="map-inline-remove" type="button" data-map-remove-connection="${connection.id}" aria-label="Remove connection">×</button>
-        </div>
-        <div class="map-exit-fields">
-          <label>Life<select data-map-connection-field="life">${connectionLifeOptions(connection.life)}</select></label>
-          <label>Mass<select data-map-connection-field="mass"><option value="stable" ${connection.mass === 'stable' ? 'selected' : ''}>Stable</option><option value="reduced" ${connection.mass === 'reduced' ? 'selected' : ''}>Reduced</option><option value="critical" ${connection.mass === 'critical' ? 'selected' : ''}>Critical</option></select></label>
-          <label>Size<select data-map-connection-field="size"><option value="frigate" ${connection.size === 'frigate' ? 'selected' : ''}>Frigate</option><option value="small" ${connection.size === 'small' ? 'selected' : ''}>Small</option><option value="medium" ${connection.size === 'medium' ? 'selected' : ''}>Medium</option><option value="large" ${connection.size === 'large' ? 'selected' : ''}>Large</option><option value="xlarge" ${connection.size === 'xlarge' ? 'selected' : ''}>XL</option></select></label>
-        </div>
-        <div class="map-exit-fields map-exit-identifiers">
-          <label>Near sig<input maxlength="7" autocomplete="off" value="${svgEscape(connection.from === node.id ? connection.fromSignature : connection.toSignature)}" data-map-connection-field="nearSignature" placeholder="ABC-123"></label>
-          <label>Type<input maxlength="12" autocomplete="off" value="${svgEscape(connection.type)}" data-map-connection-field="type" placeholder="K162"></label>
-        </div>
-      </article>`;
-    }).join('');
-    const unassignedSection = unassignedConnections.length ? `<details class="map-unassigned-connections"><summary>Unassigned exits <span class="map-section-count">${unassignedConnections.length}</span></summary>${unassignedExits}</details>` : '';
+    const signatureEntries = mapSystemSignatureRows(this.map, node.id);
     const draggableSignatureIds = new Set(wormholeSignatureCandidates(this.map, node.id).map((signature) => signature.id));
-    const signatureRows = signatures.length ? signatures.map((signature) => {
-      const connection = connections.find((candidate) => signatureForConnection(candidate)?.id === signature.id);
+    const signatureRows = signatureEntries.length ? signatureEntries.map(({ signature, connection, synthetic }) => {
       const otherId = connection ? connection.from === node.id ? connection.to : connection.from : null;
       const other = otherId ? this.graph.get(otherId) : null;
       const effectiveGroup = connection && signature.group === 'Cosmic Signature' ? 'Wormhole' : signature.group;
       const group = effectiveGroup === 'Cosmic Signature' ? 'Signature' : effectiveGroup;
       const detail = signature.type || signature.name || '—';
       const displayedDetail = connection ? [other?.name || otherId, connection.type].filter(Boolean).join(' · ') : detail;
-      const editing = this.editingSignature?.systemId === node.id && this.editingSignature.id === signature.id;
-      const draggable = draggableSignatureIds.has(signature.id) && !editing;
+      const editing = this.editingSignature?.systemId === node.id
+        && this.editingSignature.id === signature.id
+        && (this.editingSignature.connectionId || '') === (synthetic ? connection.id : '');
+      const draggable = !synthetic && draggableSignatureIds.has(signature.id) && !editing;
       const connectionEditor = connection ? `<div class="map-signature-connection" data-map-connection-card="${connection.id}">
         <div class="map-signature-connection-heading"><span>Connection</span><button type="button" data-map-select-system="${otherId}">${svgEscape(other?.name || otherId)}</button><button class="map-inline-remove" type="button" data-map-remove-connection="${connection.id}" aria-label="Remove connection to ${svgEscape(other?.name || otherId)}">×</button></div>
         <div class="map-exit-fields map-signature-connection-fields">
@@ -494,8 +508,8 @@ export class MapperView {
         </div>
       </div>` : '';
       const editor = editing ? `<tr id="map-signature-editor-${svgEscape(signature.id)}" class="map-signature-editor-row"><td colspan="5">
-        <form class="map-signature-edit-form" data-map-signature-edit-form="${svgEscape(signature.id)}" ${connection ? `data-map-connection-id="${connection.id}"` : ''} autocomplete="off">
-          <label><span>Signature</span><input name="id" maxlength="7" value="${svgEscape(signature.id)}" aria-label="Signature ID" required></label>
+        <form class="map-signature-edit-form" data-map-signature-edit-form="${synthetic ? '' : svgEscape(signature.id)}" ${connection ? `data-map-connection-id="${connection.id}"` : ''} ${synthetic ? `data-map-synthetic-connection-id="${connection.id}"` : ''} autocomplete="off">
+          <label><span>Signature</span><input name="id" maxlength="7" value="${svgEscape(synthetic && signature.id === '???-???' ? '' : signature.id)}" placeholder="ABC-123" aria-label="Signature ID" required></label>
           <label><span>Group</span><select name="group" aria-label="Signature group">${signatureGroupOptions(effectiveGroup)}</select></label>
           <label class="map-signature-edit-type"><span>Type / name</span><input name="type" maxlength="72" value="${svgEscape(signature.type || signature.name)}" aria-label="Signature type or name"></label>
           ${connectionEditor}
@@ -503,12 +517,12 @@ export class MapperView {
         </form>
       </td></tr>` : '';
       const dragTitle = draggable ? ' · Drag onto a system to assign' : '';
-      return `<tr class="map-signature-row ${editing ? 'is-editing' : ''}" data-map-edit-signature="${svgEscape(signature.id)}" ${draggable ? `draggable="true" data-map-drag-signature="${svgEscape(signature.id)}" data-map-drag-system="${node.id}"` : ''} title="${svgEscape(`${signature.id} · ${effectiveGroup}${detail === '—' ? '' : ` · ${detail}`}${connection ? ` · ${other?.name || otherId}` : ''}${dragTitle}`)}">
+      return `<tr class="map-signature-row ${editing ? 'is-editing' : ''}" data-map-edit-signature="${svgEscape(signature.id)}" ${synthetic ? `data-map-edit-connection-id="${connection.id}" data-map-synthetic-signature="true"` : ''} ${draggable ? `draggable="true" data-map-drag-signature="${svgEscape(signature.id)}" data-map-drag-system="${node.id}"` : ''} title="${svgEscape(`${signature.id} · ${effectiveGroup}${detail === '—' ? '' : ` · ${detail}`}${connection ? ` · ${other?.name || otherId}` : ''}${dragTitle}`)}">
         <td class="map-signature-id"><button class="map-signature-edit-trigger" type="button" aria-expanded="${editing}" aria-label="Edit signature ${svgEscape(signature.id)}">${svgEscape(signature.id)}</button></td>
         <td class="map-signature-group">${svgEscape(group)}</td>
         <td class="map-signature-type" title="${svgEscape(displayedDetail)}">${svgEscape(displayedDetail)}</td>
         <td class="map-signature-age">${svgEscape(ageLabel(signature.updatedAt))}</td>
-        <td class="map-signature-remove"><button type="button" data-map-remove-signature="${svgEscape(signature.id)}" aria-label="Remove ${svgEscape(signature.id)}">×</button></td>
+        <td class="map-signature-remove"><button type="button" ${synthetic ? `data-map-remove-connection="${connection.id}" aria-label="Remove connection to ${svgEscape(other?.name || otherId)}"` : `data-map-remove-signature="${svgEscape(signature.id)}" aria-label="Remove ${svgEscape(signature.id)}"`}>×</button></td>
       </tr>${editor}`;
     }).join('') : '<tr><td class="map-signature-empty" colspan="5">No signatures recorded.</td></tr>';
     const systemFacts = wormhole
@@ -518,11 +532,10 @@ export class MapperView {
       <div class="map-inspector-title-row"><div><span class="eyebrow">Selected system</span><input class="map-system-alias-input" data-map-node-field="alias" value="${svgEscape(node.alias)}" placeholder="${svgEscape(wormhole?.heading || system.name)}" maxlength="60" aria-label="System alias"></div><button class="map-system-remove" type="button" data-map-action="remove-system" aria-label="Remove ${svgEscape(system.name)}" title="Remove system">×</button></div>
       <p class="map-system-facts">${systemFacts.map((fact) => `<span>${svgEscape(fact)}</span>`).join('')}</p>
     </header>
-    <section class="map-inspector-section"><div class="map-section-heading"><h2>Signatures <span class="map-section-count">${signatures.length}</span></h2><button class="button button-primary map-paste-button" type="button" data-map-action="paste-signatures"><svg class="map-paste-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5h-1A1.5 1.5 0 0 0 3 5v7.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V5a1.5 1.5 0 0 0-1.5-1.5h-1"/><rect x="5.5" y="2" width="5" height="3" rx="1"/></svg><span>Paste scan</span></button></div>
+    <section class="map-inspector-section"><div class="map-section-heading"><h2>Signatures <span class="map-section-count">${signatureEntries.length}</span></h2><button class="button button-primary map-paste-button" type="button" data-map-action="paste-signatures"><svg class="map-paste-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5h-1A1.5 1.5 0 0 0 3 5v7.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V5a1.5 1.5 0 0 0-1.5-1.5h-1"/><rect x="5.5" y="2" width="5" height="3" rx="1"/></svg><span>Paste scan</span></button></div>
       <table class="map-signature-table"><tbody>${signatureRows}</tbody></table>
       <details class="map-signature-manual"><summary>Add one manually</summary><form id="map-signature-form" class="map-signature-form" autocomplete="off"><input id="map-signature-id" maxlength="7" placeholder="ABC" aria-label="Signature ID" autocapitalize="characters" required><select id="map-signature-group" aria-label="Signature group"><option>Wormhole</option><option>Relic Site</option><option>Data Site</option><option>Gas Site</option><option>Combat Site</option><option>Unknown</option></select><input id="map-signature-type" maxlength="72" placeholder="Type / name" aria-label="Signature type"><button class="button button-ghost" type="submit">Add</button></form></details>
       <details class="map-signature-import"><summary>Paste probe scanner results</summary><textarea id="map-signature-paste" rows="5" placeholder="Copy rows from the EVE probe scanner and paste them here"></textarea><button class="button button-ghost" type="button" data-map-action="import-signatures">Import scan</button></details>
-      ${unassignedSection}
     </section>`;
   }
 
@@ -795,12 +808,58 @@ export class MapperView {
     return true;
   }
 
-  editSignature(signatureId) {
+  editSignature(signatureId, connectionId = '') {
     const id = String(signatureId || '').toUpperCase();
-    const sameSignature = this.editingSignature?.systemId === this.map.selectedSystemId && this.editingSignature.id === id;
-    this.editingSignature = sameSignature ? null : { systemId: this.map.selectedSystemId, id };
+    const mappedConnectionId = String(connectionId || '');
+    const sameSignature = this.editingSignature?.systemId === this.map.selectedSystemId
+      && this.editingSignature.id === id
+      && (this.editingSignature.connectionId || '') === mappedConnectionId;
+    this.editingSignature = sameSignature ? null : { systemId: this.map.selectedSystemId, id, connectionId: mappedConnectionId };
     this.renderInspector();
     if (!sameSignature) requestAnimationFrame(() => document.querySelector('[data-map-signature-edit-form] input[name="id"]')?.select());
+  }
+
+  async saveSignatureEdit(editForm) {
+    const originalId = editForm.dataset.mapSignatureEditForm;
+    const syntheticConnectionId = editForm.dataset.mapSyntheticConnectionId || '';
+    const id = editForm.elements.namedItem('id').value.trim().toUpperCase();
+    const group = editForm.elements.namedItem('group').value;
+    const type = editForm.elements.namedItem('type').value.trim();
+    const connectionId = editForm.dataset.mapConnectionId || '';
+    if (!SIGNATURE_ID_PATTERN.test(id)) {
+      this.toast('Use three letters or a full signature ID, such as ABC or ABC-123.', 'error');
+      return false;
+    }
+    const duplicate = !syntheticConnectionId && (this.map.signatures[this.map.selectedSystemId] || [])
+      .some((signature) => signature.id === id && signature.id !== originalId);
+    if (duplicate) {
+      this.toast(`${id} already exists in this system.`, 'error');
+      return false;
+    }
+    this.editingSignature = null;
+    await this.mutate((map) => {
+      const updatedAt = new Date().toISOString();
+      const assigned = syntheticConnectionId
+        ? assignConnectionSignature(map, syntheticConnectionId, map.selectedSystemId, id, () => updatedAt)
+        : map;
+      const next = updateMapSignature(assigned, map.selectedSystemId, syntheticConnectionId ? id : originalId, { id, group, type, name: type }, () => updatedAt);
+      if (!connectionId) return next;
+      const life = editForm.elements.namedItem('connectionLife').value;
+      const mass = editForm.elements.namedItem('connectionMass').value;
+      const size = editForm.elements.namedItem('connectionSize').value;
+      const connectionType = editForm.elements.namedItem('connectionType').value.trim().toUpperCase();
+      return {
+        ...next,
+        connections: next.connections.map((connection) => {
+          if (connection.id !== connectionId) return connection;
+          const signatureField = connection.from === map.selectedSystemId ? 'fromSignature' : 'toSignature';
+          return updateConnectionCondition(connection, { [signatureField]: id, life, mass, size, type: connectionType }, updatedAt);
+        }),
+        updatedAt
+      };
+    });
+    this.toast(`${id} updated.`);
+    return true;
   }
 
   openConnectionEditor(connectionId) {
@@ -1104,43 +1163,13 @@ export class MapperView {
         return this.importSignatureText(textarea?.value);
       }
       const editSignature = event.target.closest('[data-map-edit-signature]');
-      if (editSignature) return this.editSignature(editSignature.dataset.mapEditSignature);
+      if (editSignature) return this.editSignature(editSignature.dataset.mapEditSignature, editSignature.dataset.mapEditConnectionId);
     });
     document.getElementById('map-inspector-content')?.addEventListener('submit', async (event) => {
       const editForm = event.target.closest('[data-map-signature-edit-form]');
       if (!editForm && event.target.id !== 'map-signature-form') return;
       event.preventDefault();
-      if (editForm) {
-        const originalId = editForm.dataset.mapSignatureEditForm;
-        const id = editForm.elements.namedItem('id').value.trim().toUpperCase();
-        const group = editForm.elements.namedItem('group').value;
-        const type = editForm.elements.namedItem('type').value.trim();
-        const connectionId = editForm.dataset.mapConnectionId || '';
-        if (!SIGNATURE_ID_PATTERN.test(id)) return this.toast('Use three letters or a full signature ID, such as ABC or ABC-123.', 'error');
-        const duplicate = (this.map.signatures[this.map.selectedSystemId] || []).some((signature) => signature.id === id && signature.id !== originalId);
-        if (duplicate) return this.toast(`${id} already exists in this system.`, 'error');
-        this.editingSignature = null;
-        await this.mutate((map) => {
-          const updatedAt = new Date().toISOString();
-          const next = updateMapSignature(map, map.selectedSystemId, originalId, { id, group, type, name: type }, () => updatedAt);
-          if (!connectionId) return next;
-          const life = editForm.elements.namedItem('connectionLife').value;
-          const mass = editForm.elements.namedItem('connectionMass').value;
-          const size = editForm.elements.namedItem('connectionSize').value;
-          const connectionType = editForm.elements.namedItem('connectionType').value.trim().toUpperCase();
-          return {
-            ...next,
-            connections: next.connections.map((connection) => {
-              if (connection.id !== connectionId) return connection;
-              const signatureField = connection.from === map.selectedSystemId ? 'fromSignature' : 'toSignature';
-              return updateConnectionCondition(connection, { [signatureField]: id, life, mass, size, type: connectionType }, updatedAt);
-            }),
-            updatedAt
-          };
-        });
-        this.toast(`${id} updated.`);
-        return;
-      }
+      if (editForm) return this.saveSignatureEdit(editForm);
       const signature = {
         id: document.getElementById('map-signature-id').value.trim().toUpperCase(),
         group: document.getElementById('map-signature-group').value,
@@ -1157,32 +1186,6 @@ export class MapperView {
         const value = event.target.value.trim();
         return this.mutate((map) => ({ ...map, nodes: map.nodes.map((node) => node.id === map.selectedSystemId ? { ...node, [nodeField]: value, updatedAt: new Date().toISOString() } : node) }));
       }
-      const connectionField = event.target.dataset.mapConnectionField;
-      if (!connectionField) return;
-      const card = event.target.closest('[data-map-connection-card]');
-      if (!card) return;
-      let field = connectionField;
-      if (field === 'nearSignature') {
-        const connection = this.map.connections.find((candidate) => candidate.id === card.dataset.mapConnectionCard);
-        if (!connection) return;
-        const signatureId = this.resolveSignatureReference(this.map.selectedSystemId, event.target.value);
-        if (signatureId && !SIGNATURE_ID_PATTERN.test(signatureId)) return this.toast('Use three letters or a full signature ID, such as ABC or ABC-123.', 'error');
-        if (signatureId) return this.mutate((map) => assignConnectionSignature(map, connection.id, map.selectedSystemId, signatureId));
-        field = connection.from === this.map.selectedSystemId ? 'fromSignature' : 'toSignature';
-      }
-      const value = event.target.value.trim();
-      const updatedAt = new Date().toISOString();
-      this.mutate((map) => ({
-        ...map,
-        connections: map.connections.map((connection) => {
-          if (connection.id !== card.dataset.mapConnectionCard) return connection;
-          const normalizedValue = ['type', 'fromSignature', 'toSignature'].includes(field) ? value.toUpperCase() : value;
-          return ['life', 'mass', 'size'].includes(field)
-            ? updateConnectionCondition(connection, { [field]: normalizedValue }, updatedAt)
-            : { ...connection, [field]: normalizedValue, updatedAt };
-        }),
-        updatedAt
-      }));
     });
     document.addEventListener('paste', (event) => {
       const mapView = document.getElementById('view-map');
