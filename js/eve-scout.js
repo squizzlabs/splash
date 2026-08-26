@@ -1,4 +1,4 @@
-import { APP_CONFIG } from './config.js';
+import { APP_CONFIG } from './config.js?v=20260826-1';
 
 export const EVE_SCOUT_HUBS = Object.freeze({
   thera: Object.freeze({ id: 31000005, name: 'Thera' }),

@@ -1,4 +1,4 @@
-import { normalizeWormholeHubs } from './eve-scout.js';
+import { normalizeWormholeHubs } from './eve-scout.js?v=20260826-1';
 
 export const ROUTE_STATUSES = Object.freeze(['draft', 'ready', 'archived']);
 export const ROUTE_PREFERENCES = Object.freeze(['Shorter', 'Safer', 'LessSecure']);

@@ -1,4 +1,4 @@
-import { mergeCalculatedLegs, routeRequestBody } from './domain.js';
+import { mergeCalculatedLegs, routeRequestBody } from './domain.js?v=20260826-1';
 
 const MARKET_HUB_STATION_IDS = Object.freeze([
   60003760, // Jita

@@ -1,8 +1,8 @@
-import { APP_CONFIG } from './config.js';
-import { TripStore } from './db.js';
-import { ESIClient } from './esi.js';
-import { connectionsForWormholeHubs, EveScoutClient, normalizeWormholeHubs, wormholeStepsForPath } from './eve-scout.js';
-import { mapRoutingConnections, mapWormholeStepsForPath } from './map-domain.js';
+import { APP_CONFIG } from './config.js?v=20260826-1';
+import { TripStore } from './db.js?v=20260826-1';
+import { ESIClient } from './esi.js?v=20260826-1';
+import { connectionsForWormholeHubs, EveScoutClient, normalizeWormholeHubs, wormholeStepsForPath } from './eve-scout.js?v=20260826-1';
+import { mapRoutingConnections, mapWormholeStepsForPath } from './map-domain.js?v=20260826-1';
 import {
   advanceRouteProgress,
   buildRoute,
@@ -19,12 +19,12 @@ import {
   routeStopSystemIndexes,
   serializeRoutes,
   systemSecurityColor
-} from './domain.js';
-import { MapperView } from './map-view.js';
-import { parseViewHash, viewHash } from './navigation.js';
-import { UniverseGraph } from './route-planner.js';
-import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnlineCharacterData } from './presence.js';
-import { TabCoordinator } from './tab-coordinator.js';
+} from './domain.js?v=20260826-1';
+import { MapperView } from './map-view.js?v=20260826-1';
+import { parseViewHash, viewHash } from './navigation.js?v=20260826-1';
+import { UniverseGraph } from './route-planner.js?v=20260826-1';
+import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnlineCharacterData } from './presence.js?v=20260826-1';
+import { TabCoordinator } from './tab-coordinator.js?v=20260826-1';
 
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
 const ONLINE_REFRESH_MS = 15_000;

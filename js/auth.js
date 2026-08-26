@@ -1,5 +1,5 @@
-import { TripStore } from './db.js';
-import { ESIClient } from './esi.js';
+import { TripStore } from './db.js?v=20260826-1';
+import { ESIClient } from './esi.js?v=20260826-1';
 
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
 if (redirectToLocalhost) {

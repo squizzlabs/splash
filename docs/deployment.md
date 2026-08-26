@@ -2,6 +2,8 @@
 
 Splash is a static application. Hosting serves the repository’s HTML, CSS, JavaScript, images, and generated universe data directly. There is no server process, token service, or database to deploy.
 
+Browser CSS and JavaScript URLs carry a shared deployment version query. Bump that token on the stylesheet, module entry points, and internal module imports whenever those assets change. The cache-busting test enforces that every runtime reference uses the same token.
+
 ## Hosting requirements
 
 A deployment needs:
