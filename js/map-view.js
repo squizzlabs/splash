@@ -22,7 +22,7 @@ import {
   updateMapSignature,
   upsertSignatures,
   wormholeSignatureCandidates
-} from './map-domain.js?v=20260826-1';
+} from './map-domain.js?v=20260826-2';
 
 const MAP_STATE_KEY = 'mapper-state';
 const MAP_VIEWPORT_KEY = 'mapper-viewport';

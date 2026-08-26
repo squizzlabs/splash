@@ -90,6 +90,7 @@
 html { min-width: 320px; background: var(--bg); }
 
 body {
+  container-type: inline-size;
   min-height: 100vh;
   margin: 0;
   background:
@@ -171,9 +172,9 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
   padding: 2px 3px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-width: none;
 }
+.avatar-stack::-webkit-scrollbar { display: none; }
 .avatar-character, .avatar-fallback {
   flex: 0 0 auto;
   width: 36px;
@@ -224,7 +225,7 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
 .eyebrow { color: var(--muted-strong); font-size: 10px; font-weight: 820; letter-spacing: .18em; text-transform: uppercase; }
 
 /* Wormhole map */
-.map-view { width: 100vw; margin-left: calc(50% - 50vw); }
+.map-view { width: 100cqw; margin-left: calc(50% - 50cqw); }
 .map-workspace {
   /* Text tokens stay at 7:1 or better on every mapper panel surface. */
   --bg: #0b0f14;
@@ -339,7 +340,7 @@ html[data-app-state="loading"] .topbar-actions { pointer-events: none; }
 .map-legend i.is-under-1h { border-color: #ff9366; }
 .map-legend i.is-expired { border-color: #ff6b75; }
 .map-legend i.is-critical { border-top-style: dotted; border-color: #477492; }
-.map-inspector { min-width: 0; overflow: auto; background: color-mix(in srgb, var(--panel) 95%, #000); border-left: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.map-inspector { min-width: 0; overflow-x: hidden; overflow-y: auto; background: color-mix(in srgb, var(--panel) 95%, #000); border-left: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .map-inspector-empty { display: grid; place-items: center; align-content: center; min-height: 100%; padding: 32px 22px; text-align: center; }
 .map-inspector-empty > span { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 13px; color: var(--accent); border: 1px solid var(--line); border-radius: 50%; font-size: 22px; }
 .map-inspector-empty h2 { margin: 0 0 6px; font-size: 17px; }
@@ -1000,7 +1001,6 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
   .detail-actions { flex-wrap: wrap; }
   .detail-actions .footer-spacer { display: none; }
   .detail-actions .button { flex: 1; }
-  .map-view { width: 100vw; margin-left: calc(50% - 50vw); }
   .map-workspace { display: block; height: auto; min-height: 0; overflow: visible; }
   .map-stage { height: calc(100vh - 64px); min-height: 560px; }
   .map-auto-track > span:last-child { display: none; }

@@ -56,3 +56,11 @@ test('wormhole jump prompt keeps mapper contrast guarantees', () => {
     assert.ok(ratio >= 3, `--line on ${background} is only ${ratio.toFixed(2)}:1 in jump prompt`);
   }
 });
+
+test('mapper full-bleed layout does not create horizontal scrollbars', () => {
+  assert.match(css, /body\s*\{[^}]*container-type:\s*inline-size;/s);
+  assert.match(css, /\.map-view\s*\{[^}]*width:\s*100cqw;[^}]*margin-left:\s*calc\(50% - 50cqw\);/s);
+  assert.doesNotMatch(css, /\.map-view\s*\{[^}]*100vw/s);
+  assert.match(css, /\.map-inspector\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
+  assert.match(css, /\.avatar-stack\s*\{[^}]*overflow-x:\s*auto;[^}]*scrollbar-width:\s*none;/s);
+});

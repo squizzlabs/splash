@@ -1,4 +1,4 @@
-import { APP_CONFIG } from './config.js?v=20260826-1';
+import { APP_CONFIG } from './config.js?v=20260826-2';
 
 const OAUTH_PREFIX = 'splash:oauth:';
 
