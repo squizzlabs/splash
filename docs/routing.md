@@ -89,7 +89,7 @@ The direct-route form previews one calculated path whenever all selected pilots 
 
 ## Route Progress
 
-Online state is checked every 15 seconds. Online character location and ship data are refreshed every 8 seconds.
+Online state is checked one second after ESI's reported cache window (falling back to 61 seconds when no cache header is provided). Online character location and ship data are refreshed every 8 seconds.
 
 Route Progress compares the live character location with the calculated system path. Pilots are sorted by jumps remaining by default, with pilot name available as an alternate sort. Transit systems are squares, specified route stops are plus signs, and a final station or structure is a hollow square. Expanding a progress row shows each remaining system’s name, security status, and region.
 

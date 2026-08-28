@@ -33,6 +33,14 @@ function normalizeIssuer(value) {
   return String(value || '').trim().toLocaleLowerCase().replace(/\/+$/, '');
 }
 
+function cacheTtlMs(headers) {
+  const cacheControl = headers?.get('Cache-Control') || '';
+  const maxAge = cacheControl.match(/(?:^|,)\s*max-age\s*=\s*(\d+)/i);
+  if (!maxAge) return null;
+  const age = Number(headers.get('Age') || 0);
+  return Math.max(0, Number(maxAge[1]) - age) * 1000;
+}
+
 function isLocalHostname(hostname) {
   return ['localhost', '127.0.0.1'].includes(hostname);
 }
@@ -339,7 +347,8 @@ export class ESIClient {
       online: Boolean(response.data.online),
       lastLogin: response.data.last_login || null,
       lastLogout: response.data.last_logout || null,
-      logins: Number(response.data.logins || 0)
+      logins: Number(response.data.logins || 0),
+      cacheTtlMs: cacheTtlMs(response.headers)
     };
   }
 

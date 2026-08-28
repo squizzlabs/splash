@@ -27,7 +27,10 @@ import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnli
 import { TabCoordinator } from './tab-coordinator.js?v=20260826-2';
 
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
-const ONLINE_REFRESH_MS = 15_000;
+// ESI caches the character /online response for 60 seconds. Check one second
+// after that window so we do not repeatedly request a response that cannot
+// have changed yet.
+const ONLINE_REFRESH_FALLBACK_MS = 61_000;
 const LOCATION_REFRESH_MS = 8_000;
 const DEFAULT_AVOID_SYSTEM_IDS = Object.freeze([30000142]);
 const ACTIVE_CHARACTER_SESSION_KEY = 'splash:active-character-id';
@@ -1425,7 +1428,8 @@ async function refreshCharacterOnline(character, quiet = false) {
     const updated = await syncCharacterOnline(character, {
       getOnline: (characterId) => esi.characterOnline(characterId)
     });
-    return persistEsiCharacter(updated);
+    const saved = await persistEsiCharacter(updated);
+    return { character: saved, cacheTtlMs: updated.esiCacheTtlMs ?? null };
   } catch (error) {
     const updated = {
       ...character,
@@ -1481,7 +1485,12 @@ async function refreshOnlineStatuses() {
   }
   state.presenceSyncing = true;
   try {
-    await Promise.allSettled(state.characters.map((character) => refreshCharacterOnline(character, true)));
+    const results = await Promise.allSettled(state.characters.map((character) => refreshCharacterOnline(character, true)));
+    const ttls = results
+      .filter((result) => result.status === 'fulfilled' && Number.isFinite(result.value?.cacheTtlMs))
+      .map((result) => result.value.cacheTtlMs);
+    const nextRefreshMs = ttls.length ? Math.max(1_000, Math.min(...ttls) + 1_000) : ONLINE_REFRESH_FALLBACK_MS;
+    state.onlineTimer = window.setTimeout(refreshOnlineStatuses, nextRefreshMs);
     await state.mapper?.observeCharacters(state.characters, { trackMovements: false });
     renderPilotData();
   } finally {
@@ -3743,7 +3752,7 @@ async function initialize() {
     revealInitializedApp();
     tabCoordinator.start();
     flushExternalStoreChanges();
-    state.onlineTimer = window.setInterval(refreshOnlineStatuses, ONLINE_REFRESH_MS);
+    state.onlineTimer = window.setTimeout(refreshOnlineStatuses, ONLINE_REFRESH_FALLBACK_MS);
     state.locationTimer = window.setInterval(refreshOnlineLocations, LOCATION_REFRESH_MS);
   } catch (error) {
     console.error(error);

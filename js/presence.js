@@ -16,6 +16,7 @@ export async function syncCharacterOnline(character, services, now = () => new D
     ...character,
     presence,
     onlineError: null,
+    esiCacheTtlMs: status.cacheTtlMs,
     ...(presence.online ? {} : { locationError: null, shipError: null })
   };
 }
