@@ -913,6 +913,15 @@ body.is-reordering-waypoint { cursor: grabbing; user-select: none; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 50; max-width: min(390px, calc(100vw - 48px)); padding: 13px 16px; color: var(--text); background: var(--panel-strong); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 9px; box-shadow: var(--shadow); font-size: 12px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s, transform .2s; }
 .modal > .toast { position: absolute; right: 16px; bottom: 70px; max-width: min(390px, calc(100% - 32px)); }
 .toast.is-visible { opacity: 1; transform: none; }
+.system-intel { position: absolute; right: 14px; bottom: 14px; z-index: 4; width: min(420px, calc(100% - 28px)); display: grid; gap: 7px; justify-items: end; pointer-events: none; }
+.system-intel-window { position: absolute; right: 5px; bottom: 5px; z-index: 1; padding: 2px 4px; color: rgb(184 197 209 / 72%); background: rgb(8 11 16 / 72%); border-radius: 3px; font-size: 7px; font-weight: 700; letter-spacing: .03em; line-height: 1.15; text-transform: uppercase; white-space: nowrap; }
+#system-streambox[hidden] + .system-intel-window { display: none; }
+.system-intel-counts { display: flex; gap: 7px; pointer-events: auto; }
+.system-intel-counts a { display: grid; min-width: 54px; padding: 5px 9px 4px; color: var(--text); background: rgb(20 27 36 / 94%); border: 1px solid var(--line); border-radius: 7px; text-align: center; text-decoration: none; box-shadow: var(--shadow); }
+.system-intel-counts a:hover { border-color: var(--accent); }
+.system-intel-counts strong { color: var(--accent); font-size: 15px; line-height: 1; }
+.system-intel-counts small { margin-top: 3px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+#system-streambox { width: 400px; height: 125px; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); pointer-events: auto; }
 .toast.is-error { border-left-color: var(--danger); }
 
 .auth-page { display: grid; place-items: center; padding: 24px; }

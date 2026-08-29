@@ -25,6 +25,7 @@ import { parseViewHash, viewHash } from './navigation.js?v=20260826-2';
 import { UniverseGraph } from './route-planner.js?v=20260826-2';
 import { isCharacterOnline, syncCharacterOnline, syncCharacterPresence, syncOnlineCharacterData } from './presence.js?v=20260826-2';
 import { TabCoordinator } from './tab-coordinator.js?v=20260826-2';
+import { loadSystemKillStats } from './kill-stats.js?v=20260826-2';
 
 const redirectToLocalhost = window.location.hostname === '127.0.0.1';
 // ESI caches the character /online response for 60 seconds. Check one second
@@ -494,6 +495,30 @@ function updateSelectedMapHash(systemId) {
   writeViewHash(viewHash('map', systemId), { replace: true });
 }
 
+let systemIntelRequest = 0;
+async function updateSystemIntel(systemId = state.mapper?.map.selectedSystemId) {
+  const id = Number(systemId);
+  const characterId = Number(state.activeCharacterId);
+  const frame = $('system-streambox');
+  if (!id || !characterId || !frame) return;
+  const request = ++systemIntelRequest;
+  frame.src = `https://zkillboard.com/system/${id}/streambox/`;
+  frame.hidden = false;
+  ['system-kills-me', 'system-kills-corp', 'system-kills-alliance'].forEach((key) => { $(key).textContent = '…'; });
+  try {
+    const stats = await loadSystemKillStats(id, characterId);
+    if (request !== systemIntelRequest) return;
+    [['system-kills-me-link', stats.links.me], ['system-kills-corp-link', stats.links.corp], ['system-kills-alliance-link', stats.links.alliance]].forEach(([key, href]) => { const link = $(key); if (link) link.href = href || '#'; });
+    $('system-kills-me').textContent = stats.me;
+    $('system-kills-corp').textContent = stats.corp;
+    $('system-kills-alliance').textContent = stats.alliance;
+  } catch (error) {
+    if (request !== systemIntelRequest) return;
+    ['system-kills-me', 'system-kills-corp', 'system-kills-alliance'].forEach((key) => { $(key).textContent = '—'; });
+    console.warn('System kill activity unavailable:', error);
+  }
+}
+
 async function switchActiveCharacter(characterId) {
   const character = state.characters.find((candidate) => Number(candidate.id) === Number(characterId));
   if (!character || state.activeCharacterId === character.id) return false;
@@ -501,6 +526,7 @@ async function switchActiveCharacter(characterId) {
   sessionStorage.setItem(ACTIVE_CHARACTER_SESSION_KEY, String(character.id));
   await store.setSetting('active-character-id', character.id);
   state.mapper?.setActiveCharacter(character.id, { fit: currentViewName() === 'map' });
+  updateSystemIntel();
   renderHeader();
   if (currentViewName() === 'map') {
     const selected = state.mapper?.visibleNodes.some((node) => node.id === state.mapper.map.selectedSystemId)
@@ -3724,6 +3750,8 @@ async function initialize() {
       onSystemSelected: updateSelectedMapHash
     });
     await state.mapper.init();
+    state.mapper.onSystemSelected = (systemId) => { updateSelectedMapHash(systemId); updateSystemIntel(systemId); };
+    updateSystemIntel();
     prepareSystemAutocomplete();
     await autoRemoveCompletedPilots({ notify: false });
     renderAll();
